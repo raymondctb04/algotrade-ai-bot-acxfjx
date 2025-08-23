@@ -9,14 +9,20 @@ interface Props {
   selected: boolean;
   onAdd: () => void;
   onRemove: () => void;
+  price?: number;
+  time?: number;
 }
 
-export default function AssetRow({ entry, selected, onAdd, onRemove }: Props) {
+export default function AssetRow({ entry, selected, onAdd, onRemove, price, time }: Props) {
+  const timeText = time ? new Date(time * 1000).toLocaleTimeString() : '';
   return (
     <View style={styles.row}>
       <View style={{ flex: 1 }}>
         <Text style={styles.symbol}>{entry.displayName}</Text>
         <Text style={styles.sub}>{entry.symbol}</Text>
+        <Text style={styles.price}>
+          {price !== undefined ? `$${price.toFixed(5)} ${time ? `@ ${timeText}` : ''}` : '—'}
+        </Text>
       </View>
       {selected ? (
         <Button text="Remove" onPress={onRemove} style={[styles.action, { backgroundColor: '#c62828' }]} />
@@ -49,6 +55,11 @@ const styles = StyleSheet.create({
     opacity: 0.75,
     fontSize: 12,
     marginTop: 2,
+  },
+  price: {
+    color: colors.accent,
+    fontSize: 14,
+    marginTop: 4,
   },
   action: {
     backgroundColor: colors.primary,

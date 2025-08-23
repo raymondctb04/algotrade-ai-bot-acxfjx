@@ -38,8 +38,6 @@ export default function BottomSheetSettings({ config, onChange }: Props) {
     []
   );
 
-  const isWeb = Platform.OS === 'web';
-
   return (
     <BottomSheet
       ref={sheetRef}
@@ -92,13 +90,12 @@ export default function BottomSheetSettings({ config, onChange }: Props) {
         <Text style={styles.label}>Broker / API Provider</Text>
         <View style={styles.row}>
           <Button text="Deriv" onPress={() => onChange({ apiProvider: 'deriv' })} style={styles.chip} />
-          <Button text="Binance" onPress={() => onChange({ apiProvider: 'binance' })} style={styles.chip} />
           <Button text="Paper" onPress={() => onChange({ apiProvider: 'paper' })} style={styles.chip} />
         </View>
 
         <Text style={styles.label}>Deriv App ID</Text>
         <TextInput
-          placeholder="1089 (example)"
+          placeholder="1089"
           placeholderTextColor="#9aa4b2"
           value={config.derivAppId || ''}
           onChangeText={(t) => onChange({ derivAppId: t })}

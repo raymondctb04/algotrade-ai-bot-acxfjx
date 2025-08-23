@@ -1,15 +1,27 @@
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import Donut from '../../components/Donut';
 import Button from '../../components/Button';
 import useBotConfig from '../../hooks/useBotConfig';
 import { useRouter } from 'expo-router';
+import { tradeStore } from '../../store/tradeStore';
 
 export default function DashboardScreen() {
   const router = useRouter();
   const { config } = useBotConfig();
+  const [logs, setLogs] = useState(tradeStore.get().logs);
+  const [open, setOpen] = useState(tradeStore.get().open);
+
+  useEffect(() => {
+    const unsub = tradeStore.subscribe(() => {
+      const s = tradeStore.get();
+      setLogs(s.logs);
+      setOpen(s.open);
+    });
+    return unsub;
+  }, []);
 
   const readiness = useMemo(() => {
     const fields = [
@@ -33,6 +45,18 @@ export default function DashboardScreen() {
     };
   }, [config]);
 
+  const bestPairs = useMemo(() => {
+    const map: Record<string, number> = {};
+    logs.forEach((l) => {
+      map[l.symbol] = (map[l.symbol] || 0) + l.pnl;
+    });
+    const arr = Object.entries(map).map(([symbol, pnl]) => ({ symbol, pnl }));
+    arr.sort((a, b) => b.pnl - a.pnl);
+    return arr.slice(0, 5);
+  }, [logs]);
+
+  const totalPnL = useMemo(() => logs.reduce((acc, l) => acc + l.pnl, 0), [logs]);
+
   return (
     <View style={commonStyles.container}>
       <ScrollView
@@ -42,7 +66,7 @@ export default function DashboardScreen() {
       >
         <Text style={commonStyles.title}>Hybrid Bot Dashboard</Text>
         <Text style={commonStyles.text}>
-          Configure assets and hit Start on the Bot tab to generate signals.
+          Configure assets and hit Start on the Bot tab to generate signals and trade.
         </Text>
 
         <View style={styles.sectionCard}>
@@ -67,6 +91,41 @@ export default function DashboardScreen() {
           <Text style={styles.helper}>
             Selected assets: {config.assets.length ? config.assets.join(', ') : 'None'}
           </Text>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Open Trades ({open.length})</Text>
+          {!open.length ? (
+            <Text style={styles.helper}>No open trades.</Text>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {open.slice(0, 10).map((t) => (
+                <View key={t.contractId} style={styles.tradeRow}>
+                  <Text style={styles.tradeText}>
+                    #{t.contractId} • {t.symbol} • PnL ${t.pnl.toFixed(2)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Best Performing Pairs</Text>
+          {!bestPairs.length ? (
+            <Text style={styles.helper}>No trades yet.</Text>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {bestPairs.map((b) => (
+                <View key={b.symbol} style={styles.tradeRow}>
+                  <Text style={styles.tradeText}>
+                    {b.symbol} • Total PnL ${b.pnl.toFixed(2)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <Text style={[styles.center, { marginTop: 8 }]}>Cumulative PnL: ${totalPnL.toFixed(2)}</Text>
         </View>
 
         <View style={{ height: 24 }} />
@@ -121,5 +180,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 10,
+  },
+  tradeRow: {
+    backgroundColor: '#111a2e',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#20325a',
+    padding: 10,
+    boxShadow: '0px 2px 6px rgba(0,0,0,0.25)',
+  },
+  tradeText: {
+    color: '#d6e2ff',
   },
 });

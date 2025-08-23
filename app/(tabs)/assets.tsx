@@ -1,11 +1,12 @@
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import Button from '../../components/Button';
 import useBotConfig from '../../hooks/useBotConfig';
 import { ASSETS, AssetEntry } from '../../data/assets';
 import AssetRow from '../../components/AssetRow';
+import useDeriv from '../../hooks/useDeriv';
 
 type Category =
   | 'forex'
@@ -20,16 +21,28 @@ type Category =
 export default function AssetsScreen() {
   const { config, addAssets, removeAsset } = useBotConfig();
   const [filter, setFilter] = useState<Category>('all');
+  const deriv = useDeriv();
 
   const filteredAssets = useMemo(() => {
     if (filter === 'all') return ASSETS;
     return ASSETS.filter((a) => a.category === filter);
   }, [filter]);
 
+  useEffect(() => {
+    // Subscribe to current filtered assets for live prices
+    const syms = filteredAssets.map((a) => a.symbol);
+    deriv.subscribeSymbols(syms).catch((e) => console.log('Subscribe error', e));
+    return () => {
+      // We keep subscriptions (selected assets) but for screen we can leave on to keep updating while browsing.
+      // If you want to aggressively unsubscribe, call deriv.unsubscribeAll() here.
+    };
+  }, [filteredAssets.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleAddGroup = (cat: Category) => {
     console.log('Adding group', cat);
     const symbols = (cat === 'all' ? ASSETS : ASSETS.filter(a => a.category === cat)).map(a => a.symbol);
     addAssets(symbols);
+    deriv.subscribeSymbols(symbols).catch((e) => console.log('Subscribe group error', e));
   };
 
   return (
@@ -40,7 +53,7 @@ export default function AssetsScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={commonStyles.title}>Assets</Text>
-        <Text style={commonStyles.text}>Select and manage assets for your strategies.</Text>
+        <Text style={commonStyles.text}>Browse assets by category and manage your list. Live prices update in real-time.</Text>
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Filters</Text>
@@ -81,15 +94,23 @@ export default function AssetsScreen() {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Browse Assets</Text>
           <View style={{ gap: 8 }}>
-            {filteredAssets.map((a: AssetEntry) => (
-              <AssetRow
-                key={a.symbol}
-                entry={a}
-                selected={config.assets.includes(a.symbol)}
-                onAdd={() => addAssets([a.symbol])}
-                onRemove={() => removeAsset(a.symbol)}
-              />
-            ))}
+            {filteredAssets.map((a: AssetEntry) => {
+              const lp = deriv.getLastPrice(a.symbol);
+              return (
+                <AssetRow
+                  key={a.symbol}
+                  entry={a}
+                  selected={config.assets.includes(a.symbol)}
+                  onAdd={() => {
+                    addAssets([a.symbol]);
+                    deriv.subscribeSymbols([a.symbol]).catch((e) => console.log('Subscribe single error', e));
+                  }}
+                  onRemove={() => removeAsset(a.symbol)}
+                  price={lp?.quote}
+                  time={lp?.epoch}
+                />
+              );
+            })}
           </View>
         </View>
 

@@ -4,6 +4,10 @@ import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import Button from '../../components/Button';
 import useBotConfig from '../../hooks/useBotConfig';
+import useDeriv from '../../hooks/useDeriv';
+import CodeBlock from '../../components/CodeBlock';
+import { getPineSample } from '../../data/snippets';
+import { tradeStore } from '../../store/tradeStore';
 
 type Signal = {
   t: number;
@@ -12,8 +16,6 @@ type Signal = {
   entry: number;
   type: 'LONG' | 'FLAT';
 };
-
-type SeriesMap = Record<string, number[]>;
 
 function sma(arr: number[], len: number) {
   if (arr.length < len) return null;
@@ -25,7 +27,7 @@ function sma(arr: number[], len: number) {
 function rsi(arr: number[], period = 14) {
   if (arr.length < period + 1) return null;
   let gains = 0, losses = 0;
-  for (let i = arr.length - period; i < arr.length; i++) {
+  for (let i = arr.length - period + 1; i < arr.length; i++) {
     const diff = arr[i] - arr[i - 1];
     if (diff >= 0) gains += diff;
     else losses -= diff;
@@ -37,67 +39,65 @@ function rsi(arr: number[], period = 14) {
 
 export default function BotScreen() {
   const { config } = useBotConfig();
+  const deriv = useDeriv();
   const [running, setRunning] = useState(false);
   const [signals, setSignals] = useState<Signal[]>([]);
-  const seriesRef = useRef<SeriesMap>({});
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [showPine, setShowPine] = useState(false);
+  const [openTrades, setOpenTrades] = useState(tradeStore.get().open);
+  const [logs, setLogs] = useState(tradeStore.get().logs);
 
   const assets = config.assets;
   const confluenceThreshold = config.confluenceThreshold || 0.8;
-
   const canRun = assets.length > 0;
 
-  const start = () => {
+  useEffect(() => {
+    const unsub = tradeStore.subscribe(() => {
+      const s = tradeStore.get();
+      setOpenTrades(s.open);
+      setLogs(s.logs);
+    });
+    return unsub;
+  }, []);
+
+  const start = async () => {
     if (!canRun) {
       console.log('No assets configured');
       return;
     }
-    console.log('Bot started');
-    setRunning(true);
+    try {
+      await deriv.subscribeSymbols(assets);
+      console.log('Bot started');
+      setRunning(true);
+    } catch (e) {
+      console.log('Failed to start bot', e);
+    }
   };
   const stop = () => {
     console.log('Bot stopped');
     setRunning(false);
   };
 
+  // Signal engine: evaluate from live ticks every second
   useEffect(() => {
-    if (!running) {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      return;
-    }
-    // initialize series
-    assets.forEach((s) => {
-      if (!seriesRef.current[s]) {
-        const base = 100 + Math.random() * 50;
-        seriesRef.current[s] = Array.from({ length: 50 }, (_, i) => base + Math.sin(i / 5) * 2 + Math.random());
-      }
-    });
+    if (!running) return;
 
-    timerRef.current = setInterval(() => {
+    const timer = setInterval(() => {
       const now = Date.now();
       const nextSignals: Signal[] = [];
 
       assets.forEach((symbol) => {
-        const arr = seriesRef.current[symbol];
-        const last = arr[arr.length - 1];
-        const drift = (Math.random() - 0.5) * 0.6;
-        const next = Math.max(0.1, last + drift);
-        arr.push(next);
-        if (arr.length > 500) arr.shift();
+        const series = deriv.getSeries(symbol).map((t) => t.quote);
+        if (series.length < 30) return;
 
-        // Simplified strategy checks
-        const smaFast = sma(arr, 10);
-        const smaSlow = sma(arr, 30);
+        const last = series[series.length - 1];
+        const smaFast = sma(series, 10);
+        const smaSlow = sma(series, 30);
         const momentumUp = smaFast !== null && smaSlow !== null ? smaFast > smaSlow : false;
 
-        const r = rsi(arr, 14) ?? 50;
+        const r = rsi(series, 14) ?? 50;
         const scalpOK = r < 35;
 
-        // Mean reversion: price < smaSlow by a tolerance
-        const meanOK = smaSlow !== null ? next < smaSlow * 0.995 : false;
+        const meanOK = smaSlow !== null ? last < smaSlow * 0.995 : false;
 
         let score = 0;
         let checks = 0;
@@ -114,17 +114,8 @@ export default function BotScreen() {
             t: now,
             symbol,
             confluence,
-            entry: next,
+            entry: last,
             type: 'LONG',
-          });
-        } else if (Math.random() < 0.05) {
-          // occasionally log flat to show activity
-          nextSignals.push({
-            t: now,
-            symbol,
-            confluence,
-            entry: next,
-            type: 'FLAT',
           });
         }
       });
@@ -134,16 +125,24 @@ export default function BotScreen() {
           const merged = [...nextSignals, ...prev];
           return merged.slice(0, 50);
         });
+
+        // Auto-trade on Deriv when configured
+        if (config.apiProvider === 'deriv' && (config.apiToken || '').length > 0 && (config.derivAppId || '').length > 0) {
+          nextSignals.forEach(async (s) => {
+            try {
+              await deriv.buyRise(s.symbol, config.tradeStake || 1);
+            } catch (e) {
+              console.log('Auto trade failed', e);
+            }
+          });
+        }
       }
     }, 1000);
 
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [running, assets, confluenceThreshold]);
+    return () => clearInterval(timer);
+  }, [running, assets, confluenceThreshold, config.apiProvider, config.apiToken, config.derivAppId, config.tradeStake]); // eslint-disable-line
+
+  const pine = useMemo(() => getPineSample(config), [config]);
 
   return (
     <View style={commonStyles.container}>
@@ -154,7 +153,7 @@ export default function BotScreen() {
       >
         <Text style={commonStyles.title}>Bot</Text>
         <Text style={commonStyles.text}>
-          {canRun ? 'Press Start to begin simulated signal generation.' : 'Add assets on the Assets tab first.'}
+          {canRun ? 'Press Start to begin signal generation and auto-trading (Deriv).' : 'Add assets on the Assets tab first.'}
         </Text>
 
         <View style={styles.sectionCard}>
@@ -166,11 +165,22 @@ export default function BotScreen() {
               <Button text="Stop Bot" onPress={stop} style={[styles.chip, { backgroundColor: '#c62828' }]} />
             )}
             <Button text="Open Settings" onPress={() => (window as any).openSettingsSheet?.()} style={styles.chip} />
+            <Button text={showPine ? 'Hide Pine Script' : 'Show Pine Script'} onPress={() => setShowPine(v => !v)} style={styles.chip} />
           </View>
           <Text style={styles.helper}>
-            Assets: {assets.length ? assets.join(', ') : 'None'} | Threshold: {Math.round(confluenceThreshold * 100)}%
+            Assets: {assets.length ? assets.join(', ') : 'None'} | Threshold: {Math.round(confluenceThreshold * 100)}% | Stake: ${config.tradeStake || 1}
+          </Text>
+          <Text style={styles.helper}>
+            Deriv: {deriv?.status} {deriv?.lastError ? `• ${deriv.lastError}` : ''}
           </Text>
         </View>
+
+        {showPine ? (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Pine Script</Text>
+            <CodeBlock code={pine} language="pine" />
+          </View>
+        ) : null}
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Recent Signals</Text>
@@ -181,7 +191,41 @@ export default function BotScreen() {
               {signals.map((s) => (
                 <View key={`${s.symbol}-${s.t}-${s.type}`} style={styles.signalRow}>
                   <Text style={styles.signalText}>
-                    {new Date(s.t).toLocaleTimeString()} • {s.symbol} • {s.type} • conf {Math.round(s.confluence * 100)}% • {s.entry.toFixed(3)}
+                    {new Date(s.t).toLocaleTimeString()} • {s.symbol} • {s.type} • conf {Math.round(s.confluence * 100)}% • {s.entry.toFixed(5)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Open Trades</Text>
+          {!openTrades.length ? (
+            <Text style={styles.helper}>No open trades.</Text>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {openTrades.map((t) => (
+                <View key={t.contractId} style={styles.tradeRow}>
+                  <Text style={styles.tradeText}>
+                    #{t.contractId} • {t.symbol} • Entry {t.entry.toFixed(5)} • Stake ${t.stake} • PnL ${t.pnl?.toFixed(2)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Trade Logs</Text>
+          {!logs.length ? (
+            <Text style={styles.helper}>No closed trades yet.</Text>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {logs.slice(0, 20).map((l) => (
+                <View key={l.contractId} style={styles.tradeRow}>
+                  <Text style={styles.tradeText}>
+                    #{l.contractId} • {l.symbol} • {l.result.toUpperCase()} • PnL ${l.pnl.toFixed(2)} • {new Date(l.endTime).toLocaleTimeString()}
                   </Text>
                 </View>
               ))}
@@ -243,5 +287,16 @@ const styles = StyleSheet.create({
   },
   signalText: {
     color: '#c6d4ef',
+  },
+  tradeRow: {
+    backgroundColor: '#111a2e',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#20325a',
+    padding: 10,
+    boxShadow: '0px 2px 6px rgba(0,0,0,0.25)',
+  },
+  tradeText: {
+    color: '#d6e2ff',
   },
 });

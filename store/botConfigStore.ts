@@ -11,8 +11,8 @@ const defaultConfig: BotConfig = {
   riskPerTrade: 0.01,
   confluenceThreshold: 0.8,
   apiProvider: 'deriv',
-  apiToken: '',
-  derivAppId: '',
+  apiToken: '447o7RxNdZbG7lf',
+  derivAppId: '1089',
   tradeStake: 1,
 };
 
