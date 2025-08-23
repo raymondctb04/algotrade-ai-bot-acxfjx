@@ -30,6 +30,11 @@ export default function useDeriv() {
     }
   };
 
+  const subscribeCandlesMultiple = async (symbols: string[], granularities: number[]) => {
+    await ensureConnected();
+    await derivClient.subscribeCandlesMultiple(symbols, granularities);
+  };
+
   const unsubscribeAll = async () => {
     await derivClient.unsubscribeAllTicks();
   };
@@ -48,10 +53,12 @@ export default function useDeriv() {
     ...state,
     ensureConnected,
     subscribeSymbols,
+    subscribeCandlesMultiple,
     unsubscribeAll,
     buyRise,
     buyFall,
     getLastPrice: (s: string) => derivStore.getLastPrice(s),
     getSeries: (s: string) => derivStore.getSeries(s),
+    getCandles: (s: string, g: number) => derivStore.getCandles(s, g),
   };
 }

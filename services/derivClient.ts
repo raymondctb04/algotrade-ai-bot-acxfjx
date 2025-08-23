@@ -7,6 +7,8 @@ type DerivMessage =
   | { msg_type: 'authorize'; authorize: { loginid: string } }
   | { msg_type: 'tick'; tick: { symbol: string; quote: number; epoch: number; id?: string; subscription?: { id?: string } } }
   | { msg_type: 'ticks'; ticks: any }
+  | { msg_type: 'candles'; candles: any[]; subscription?: { id?: string }; echo_req?: any }
+  | { msg_type: 'ohlc'; ohlc: any; subscription?: { id?: string } }
   | { msg_type: 'proposal'; proposal: { id: string; ask_price: number; longcode: string } }
   | { msg_type: 'buy'; buy: { buy_price: number; transaction_id: number; contract_id: number } }
   | { msg_type: 'proposal_open_contract'; proposal_open_contract: any }
@@ -30,6 +32,7 @@ class DerivClient {
   token: string | undefined;
   tickSubs: Map<string, string> = new Map(); // symbol -> subscription id
   subscribedSymbols: Set<string> = new Set(); // remember desired subs across reconnects
+  candleSubs: Map<string, string> = new Map(); // key: symbol-gran -> sub id
   pocSubs: Set<number> = new Set(); // subscribed contract_ids
   lastConnectTs = 0;
 
@@ -55,17 +58,36 @@ class DerivClient {
       if (this.token) {
         this.authorize(this.token).catch((e) => console.log('Authorize on reconnect failed', e));
       }
-      // Re-subscribe to symbols after connection established
+      // Re-subscribe to tick symbols after connection established
       const symbols = Array.from(this.subscribedSymbols);
       if (symbols.length) {
         console.log('Re-subscribing to symbols after reconnect:', symbols.join(','));
         symbols.forEach((s) => {
-          // clear any old sub id and request a fresh subscription
           this.tickSubs.delete(s);
           try {
             this.ws?.send(JSON.stringify({ ticks: s, subscribe: 1 }));
           } catch (err) {
             console.log('Resubscribe send error', err);
+          }
+        });
+      }
+      // Re-subscribe to candles
+      if (this.candleSubs.size) {
+        const entries = Array.from(this.candleSubs.keys());
+        this.candleSubs.clear();
+        entries.forEach((key) => {
+          const [symbol, granStr] = key.split('::');
+          const gran = Number(granStr);
+          try {
+            this.ws?.send(JSON.stringify({
+              ticks_history: symbol,
+              style: 'candles',
+              granularity: gran,
+              count: 500,
+              subscribe: 1,
+            }));
+          } catch (e) {
+            console.log('Resub candle send error', key, e);
           }
         });
       }
@@ -80,6 +102,7 @@ class DerivClient {
       this.pending.clear();
       // Clear current subscription ids; we'll resubscribe on reconnect
       this.tickSubs.clear();
+      // keep candle keys to resubscribe (we clear ids above)
       // try reconnect with small delay
       setTimeout(() => {
         if (this.appId) this.connect(this.appId).catch((err) => console.log('Reconnect failed', err));
@@ -147,7 +170,6 @@ class DerivClient {
 
     if (msg.msg_type === 'tick' && (msg as any).tick) {
       const { symbol, quote, epoch, id, subscription } = (msg as any).tick;
-      // persist subscription id if not stored
       const subId = id || subscription?.id;
       if (subId && !this.tickSubs.get(symbol)) {
         this.tickSubs.set(symbol, subId);
@@ -155,12 +177,46 @@ class DerivClient {
       derivStore.updateTick(symbol, quote, epoch);
     }
 
+    if (msg.msg_type === 'candles') {
+      const candlesArr: any[] = (msg as any).candles || [];
+      const symbol: string = (msg as any).echo_req?.ticks_history;
+      const gran: number = Number((msg as any).echo_req?.granularity || 0);
+      const subId = (msg as any).subscription?.id;
+      if (symbol && gran) {
+        const mapped = candlesArr.map((c: any) => ({
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close),
+          epoch: Number(c.epoch),
+        }));
+        derivStore.setCandles(symbol, gran, mapped);
+        if (subId) {
+          this.candleSubs.set(`${symbol}::${gran}`, subId);
+        }
+      }
+    }
+
+    if (msg.msg_type === 'ohlc') {
+      const o = (msg as any).ohlc;
+      const symbol: string = o?.symbol || (msg as any).echo_req?.ticks_history;
+      const gran: number = Number(o?.granularity || (msg as any).echo_req?.granularity || 0);
+      if (symbol && gran && o) {
+        derivStore.updateCandle(symbol, gran, {
+          open: Number(o.open),
+          high: Number(o.high),
+          low: Number(o.low),
+          close: Number(o.close),
+          epoch: Number(o.open_time || o.epoch || 0),
+        });
+      }
+    }
+
     if (msg.msg_type === 'proposal_open_contract') {
       const poc = (msg as any).proposal_open_contract;
       const contractId: number = poc?.contract_id;
       if (!contractId) return;
 
-      // Update open trade status in store
       const isSold = poc.is_sold;
       const currentSpot = poc.current_spot || 0;
       const pnl = (poc.profit || 0);
@@ -172,14 +228,12 @@ class DerivClient {
       });
 
       if (isSold) {
-        // Move to logs
         tradeStore.closeContractToLog(contractId, {
           exit: currentSpot,
           endTime: Date.now(),
           pnl,
           result: pnl >= 0 ? 'win' : 'loss',
         });
-        // Unsubscribe to this contract updates
         if (this.ws) {
           this.ws.send(JSON.stringify({ forget: poc.subscription?.id }));
         }
@@ -195,7 +249,7 @@ class DerivClient {
   }
 
   async subscribeTicks(symbol: string) {
-    if (this.tickSubs.has(symbol)) return; // already
+    if (this.tickSubs.has(symbol)) return;
     this.subscribedSymbols.add(symbol);
     const res: any = await this.send({ ticks: symbol, subscribe: 1 });
     const subId = (res as any)?.tick?.id || (res as any)?.subscription?.id || (res as any)?.tick?.subscription?.id;
@@ -232,6 +286,46 @@ class DerivClient {
     const all = Array.from(this.tickSubs.keys());
     for (const s of all) {
       await this.unsubscribeTicks(s);
+    }
+  }
+
+  async subscribeCandles(symbol: string, granularitySec: number, count = 500) {
+    const key = `${symbol}::${granularitySec}`;
+    if (this.candleSubs.has(key)) return;
+    const res: any = await this.send({
+      ticks_history: symbol,
+      style: 'candles',
+      granularity: granularitySec,
+      count,
+      subscribe: 1,
+    });
+    const subId = (res as any)?.subscription?.id || (res as any)?.candles?.subscription?.id || (res as any)?.candles?.id;
+    if (subId) this.candleSubs.set(key, subId);
+    console.log('Subscribed candles', key);
+  }
+
+  async unsubscribeCandles(symbol: string, granularitySec: number) {
+    const key = `${symbol}::${granularitySec}`;
+    const id = this.candleSubs.get(key);
+    if (!id) return;
+    this.candleSubs.delete(key);
+    try {
+      this.ws?.send(JSON.stringify({ forget: id }));
+      console.log('Unsubscribed candles', key);
+    } catch (e) {
+      console.log('Unsub candles error', e);
+    }
+  }
+
+  async subscribeCandlesMultiple(symbols: string[], granularities: number[]) {
+    for (const s of symbols) {
+      for (const g of granularities) {
+        try {
+          await this.subscribeCandles(s, g);
+        } catch (e) {
+          console.log('Failed to sub candle', s, g, e);
+        }
+      }
     }
   }
 
@@ -280,7 +374,6 @@ class DerivClient {
       const { contract_id } = bought;
       console.log('Bought CALL contract', contract_id, symbol);
 
-      // Track as open trade
       const entry = derivStore.getLastPrice(symbol)?.quote || 0;
       tradeStore.addOpenTrade({
         contractId: contract_id,
@@ -294,7 +387,6 @@ class DerivClient {
         contractType: 'CALL',
       });
 
-      // Subscribe to proposal_open_contract updates
       if (!this.pocSubs.has(contract_id)) {
         this.pocSubs.add(contract_id);
         this.ws?.send(JSON.stringify({ proposal_open_contract: 1, contract_id, subscribe: 1 }));
@@ -314,7 +406,6 @@ class DerivClient {
       const { contract_id } = bought;
       console.log('Bought PUT contract', contract_id, symbol);
 
-      // Track as open trade
       const entry = derivStore.getLastPrice(symbol)?.quote || 0;
       tradeStore.addOpenTrade({
         contractId: contract_id,
@@ -328,7 +419,6 @@ class DerivClient {
         contractType: 'PUT',
       });
 
-      // Subscribe to proposal_open_contract updates
       if (!this.pocSubs.has(contract_id)) {
         this.pocSubs.add(contract_id);
         this.ws?.send(JSON.stringify({ proposal_open_contract: 1, contract_id, subscribe: 1 }));
