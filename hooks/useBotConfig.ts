@@ -1,38 +1,33 @@
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BotConfig, AssetClass, RiskTolerance, Timeframe, ApiProvider } from '../types/Bot';
+import { botConfigStore } from '../store/botConfigStore';
 
 export default function useBotConfig() {
-  const [config, setConfig] = useState<BotConfig>({
-    assetClass: 'crypto',
-    riskTolerance: 'moderate',
-    timeframe: '15m',
-    assets: [],
-    riskPerTrade: 0.01,
-    confluenceThreshold: 0.8,
-    apiProvider: 'paper',
-    apiToken: '',
-  });
+  const [config, setConfigState] = useState<BotConfig>(botConfigStore.get());
 
-  const setAssetClass = (v: AssetClass) => setConfig((c) => ({ ...c, assetClass: v }));
-  const setRiskTolerance = (v: RiskTolerance) => setConfig((c) => ({ ...c, riskTolerance: v }));
-  const setTimeframe = (v: Timeframe) => setConfig((c) => ({ ...c, timeframe: v }));
-  const setAssets = (v: string[]) => setConfig((c) => ({ ...c, assets: v }));
-  const addAssets = (vs: string[]) =>
-    setConfig((c) => {
-      const set = new Set(c.assets);
-      vs.forEach((s) => set.add(s));
-      return { ...c, assets: Array.from(set) };
-    });
-  const removeAsset = (symbol: string) =>
-    setConfig((c) => ({ ...c, assets: c.assets.filter((a) => a !== symbol) }));
-  const setRiskPerTrade = (v: number) => setConfig((c) => ({ ...c, riskPerTrade: v }));
-  const setConfluenceThreshold = (v: number) => setConfig((c) => ({ ...c, confluenceThreshold: v }));
-  const setApiProvider = (v: ApiProvider) => setConfig((c) => ({ ...c, apiProvider: v }));
-  const setApiToken = (v: string) => setConfig((c) => ({ ...c, apiToken: v }));
+  useEffect(() => {
+    const unsub = botConfigStore.subscribe((next) => setConfigState(next));
+    return unsub;
+  }, []);
+
+  const setConfig = (next: Partial<BotConfig>) => botConfigStore.set(next);
+  const setAssetClass = (v: AssetClass) => botConfigStore.set({ assetClass: v });
+  const setRiskTolerance = (v: RiskTolerance) => botConfigStore.set({ riskTolerance: v });
+  const setTimeframe = (v: Timeframe) => botConfigStore.set({ timeframe: v });
+  const setAssets = (v: string[]) => botConfigStore.set({ assets: v });
+  const addAssets = (vs: string[]) => botConfigStore.addAssets(vs);
+  const removeAsset = (symbol: string) => botConfigStore.removeAsset(symbol);
+  const setRiskPerTrade = (v: number) => botConfigStore.set({ riskPerTrade: v });
+  const setConfluenceThreshold = (v: number) => botConfigStore.set({ confluenceThreshold: v });
+  const setApiProvider = (v: ApiProvider) => botConfigStore.set({ apiProvider: v });
+  const setApiToken = (v: string) => botConfigStore.set({ apiToken: v });
+  const setDerivAppId = (v: string) => botConfigStore.set({ derivAppId: v });
+  const setTradeStake = (v: number) => botConfigStore.set({ tradeStake: v });
 
   return {
     config,
+    setConfig,
     setAssetClass,
     setRiskTolerance,
     setTimeframe,
@@ -43,5 +38,7 @@ export default function useBotConfig() {
     setConfluenceThreshold,
     setApiProvider,
     setApiToken,
+    setDerivAppId,
+    setTradeStake,
   };
 }

@@ -75,14 +75,6 @@ export default function BottomSheetSettings({ config, onChange }: Props) {
           <Button text="1d" onPress={() => onChange({ timeframe: '1d' })} style={styles.chip} />
         </View>
 
-        <Text style={styles.label}>Assets (quick picks)</Text>
-        <View style={styles.row}>
-          <Button text="BTCUSDT" onPress={() => onChange({ assets: ['BTCUSDT'] })} style={styles.chip} />
-          <Button text="ETHUSDT" onPress={() => onChange({ assets: ['ETHUSDT'] })} style={styles.chip} />
-          <Button text="EURUSD" onPress={() => onChange({ assets: ['EURUSD'] })} style={styles.chip} />
-          <Button text="AAPL" onPress={() => onChange({ assets: ['AAPL'] })} style={styles.chip} />
-        </View>
-
         <Text style={styles.label}>Risk per trade</Text>
         <View style={styles.row}>
           <Button text="1%" onPress={() => onChange({ riskPerTrade: 0.01 })} style={styles.chip} />
@@ -104,17 +96,33 @@ export default function BottomSheetSettings({ config, onChange }: Props) {
           <Button text="Paper" onPress={() => onChange({ apiProvider: 'paper' })} style={styles.chip} />
         </View>
 
-        <Text style={styles.label}>API Token (optional)</Text>
-        <Text style={styles.helper}>
-          Do not hardcode secrets in source. Use runtime input or secure storage. Your provided Deriv token will not be transmitted by this app.
-        </Text>
+        <Text style={styles.label}>Deriv App ID</Text>
         <TextInput
-          placeholder="Paste API token (kept in memory)"
+          placeholder="1089 (example)"
+          placeholderTextColor="#9aa4b2"
+          value={config.derivAppId || ''}
+          onChangeText={(t) => onChange({ derivAppId: t })}
+          style={styles.input}
+        />
+
+        <Text style={styles.label}>Deriv API Token</Text>
+        <TextInput
+          placeholder="Paste your Deriv API token"
           placeholderTextColor="#9aa4b2"
           value={config.apiToken}
           onChangeText={(t) => onChange({ apiToken: t })}
           style={styles.input}
           secureTextEntry
+        />
+
+        <Text style={styles.label}>Default Stake (USD)</Text>
+        <TextInput
+          placeholder="1"
+          placeholderTextColor="#9aa4b2"
+          keyboardType="numeric"
+          value={String(config.tradeStake || 1)}
+          onChangeText={(t) => onChange({ tradeStake: Number(t) || 1 })}
+          style={styles.input}
         />
 
         <View style={{ height: 16 }} />

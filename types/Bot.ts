@@ -13,4 +13,6 @@ export interface BotConfig {
   confluenceThreshold: number; // 0.8 = 80%
   apiProvider: ApiProvider;
   apiToken?: string;
+  derivAppId?: string; // Deriv app id used for WS connection
+  tradeStake?: number; // default stake when placing Deriv contracts
 }
