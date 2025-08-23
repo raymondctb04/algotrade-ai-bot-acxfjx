@@ -35,6 +35,7 @@ class DerivClient {
   candleSubs: Map<string, string> = new Map(); // key: symbol-gran -> sub id
   pocSubs: Set<number> = new Set(); // subscribed contract_ids
   lastConnectTs = 0;
+  private connectPromise: Promise<void> | null = null;
 
   getEndpoint(appId: string) {
     // Deriv recommended endpoint: wss://ws.derivws.com/websockets/v3?app_id=XXXXX
@@ -42,86 +43,113 @@ class DerivClient {
   }
 
   async connect(appId: string) {
-    if (this.connected && this.ws) return;
+    if (this.ws && this.ws.readyState === 1 && this.connected) {
+      return;
+    }
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
+
     this.appId = appId;
     this.lastConnectTs = Date.now();
-    derivStore.set({ status: 'connecting' });
+    derivStore.set({ status: 'connecting', lastError: undefined });
     const url = this.getEndpoint(appId);
     console.log('Deriv WS connecting:', url);
     this.ws = new WebSocket(url);
 
-    this.ws.onopen = () => {
-      console.log('Deriv WS connected');
-      this.connected = true;
-      derivStore.set({ status: 'connected' });
-      // Re-authorize if we have token
-      if (this.token) {
-        this.authorize(this.token).catch((e) => console.log('Authorize on reconnect failed', e));
-      }
-      // Re-subscribe to tick symbols after connection established
-      const symbols = Array.from(this.subscribedSymbols);
-      if (symbols.length) {
-        console.log('Re-subscribing to symbols after reconnect:', symbols.join(','));
-        symbols.forEach((s) => {
-          this.tickSubs.delete(s);
-          try {
-            this.ws?.send(JSON.stringify({ ticks: s, subscribe: 1 }));
-          } catch (err) {
-            console.log('Resubscribe send error', err);
-          }
-        });
-      }
-      // Re-subscribe to candles
-      if (this.candleSubs.size) {
-        const entries = Array.from(this.candleSubs.keys());
-        this.candleSubs.clear();
-        entries.forEach((key) => {
-          const [symbol, granStr] = key.split('::');
-          const gran = Number(granStr);
-          try {
-            this.ws?.send(JSON.stringify({
-              ticks_history: symbol,
-              style: 'candles',
-              granularity: gran,
-              count: 500,
-              subscribe: 1,
-            }));
-          } catch (e) {
-            console.log('Resub candle send error', key, e);
-          }
-        });
-      }
-    };
+    this.connectPromise = new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        this.connectPromise = null;
+      };
 
-    this.ws.onclose = (e) => {
-      console.log('Deriv WS closed', e.code, e.reason);
-      this.connected = false;
-      this.authorized = false;
-      derivStore.set({ status: 'disconnected' });
-      this.pending.forEach((p) => p.reject(new Error('Socket closed')));
-      this.pending.clear();
-      // Clear current subscription ids; we'll resubscribe on reconnect
-      this.tickSubs.clear();
-      // keep candle keys to resubscribe (we clear ids above)
-      // try reconnect with small delay
-      setTimeout(() => {
-        if (this.appId) this.connect(this.appId).catch((err) => console.log('Reconnect failed', err));
-      }, 1500);
-    };
+      this.ws!.onopen = () => {
+        console.log('Deriv WS connected');
+        this.connected = true;
+        derivStore.set({ status: 'connected', lastError: undefined });
 
-    this.ws.onerror = (e: any) => {
-      console.log('Deriv WS error', e?.message || e);
-      derivStore.set({ status: 'error' });
-    };
+        // Re-authorize if we have token
+        if (this.token) {
+          this.authorize(this.token).catch((e) => console.log('Authorize on reconnect failed', e));
+        }
+        // Re-subscribe to tick symbols after connection established
+        const symbols = Array.from(this.subscribedSymbols);
+        if (symbols.length) {
+          console.log('Re-subscribing to symbols after reconnect:', symbols.join(','));
+          symbols.forEach((s) => {
+            this.tickSubs.delete(s);
+            try {
+              this.ws?.send(JSON.stringify({ ticks: s, subscribe: 1 }));
+            } catch (err) {
+              console.log('Resubscribe send error', err);
+            }
+          });
+        }
+        // Re-subscribe to candles
+        if (this.candleSubs.size) {
+          const entries = Array.from(this.candleSubs.keys());
+          this.candleSubs.clear();
+          entries.forEach((key) => {
+            const [symbol, granStr] = key.split('::');
+            const gran = Number(granStr);
+            try {
+              this.ws?.send(JSON.stringify({
+                ticks_history: symbol,
+                style: 'candles',
+                granularity: gran,
+                count: 500,
+                subscribe: 1,
+              }));
+            } catch (e) {
+              console.log('Resub candle send error', key, e);
+            }
+          });
+        }
 
-    this.ws.onmessage = (evt) => {
-      try {
-        const data: DerivMessage = JSON.parse(evt.data);
-        this.handleMessage(data);
-      } catch (err) {
-        console.log('Deriv WS parse error', err);
-      }
-    };
+        resolve();
+        cleanup();
+      };
+
+      this.ws!.onclose = (e) => {
+        console.log('Deriv WS closed', e.code, e.reason);
+        this.connected = false;
+        this.authorized = false;
+        derivStore.set({ status: 'disconnected' });
+        this.pending.forEach((p) => p.reject(new Error('Socket closed')));
+        this.pending.clear();
+        // Clear current subscription ids; we'll resubscribe on reconnect
+        this.tickSubs.clear();
+        // try reconnect with small delay
+        setTimeout(() => {
+          if (this.appId) this.connect(this.appId).catch((err) => console.log('Reconnect failed', err));
+        }, 1500);
+
+        // Reject initial connect if it hasn't resolved yet
+        if (this.connectPromise) {
+          reject(new Error('WebSocket closed before ready'));
+          cleanup();
+        }
+      };
+
+      this.ws!.onerror = (e: any) => {
+        console.log('Deriv WS error', e?.message || e);
+        derivStore.set({ status: 'error', lastError: e?.message || 'WebSocket error' });
+        if (this.connectPromise) {
+          reject(new Error(e?.message || 'WebSocket error'));
+          cleanup();
+        }
+      };
+
+      this.ws!.onmessage = (evt) => {
+        try {
+          const data: DerivMessage = JSON.parse(evt.data);
+          this.handleMessage(data);
+        } catch (err) {
+          console.log('Deriv WS parse error', err);
+        }
+      };
+    });
+
+    return this.connectPromise;
   }
 
   send<T = any>(payload: object, expectMsgType?: string): Promise<T> {
@@ -327,6 +355,32 @@ class DerivClient {
         }
       }
     }
+  }
+
+  async unsubscribeAllCandles() {
+    const entries = Array.from(this.candleSubs.entries());
+    this.candleSubs.clear();
+    for (const [, id] of entries) {
+      try {
+        this.ws?.send(JSON.stringify({ forget: id }));
+      } catch (e) {
+        console.log('Unsub all candles error', e);
+      }
+    }
+  }
+
+  async unsubscribeAll() {
+    try {
+      await this.unsubscribeAllTicks();
+    } catch (e) {
+      console.log('Unsub all ticks error', e);
+    }
+    try {
+      await this.unsubscribeAllCandles();
+    } catch (e) {
+      console.log('Unsub all candles error', e);
+    }
+    this.subscribedSymbols.clear();
   }
 
   async proposeRise(symbol: string, stakeUSD: number) {

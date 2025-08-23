@@ -36,7 +36,7 @@ export default function useDeriv() {
   };
 
   const unsubscribeAll = async () => {
-    await derivClient.unsubscribeAllTicks();
+    await derivClient.unsubscribeAll();
   };
 
   const buyRise = async (symbol: string, stake: number) => {
