@@ -5,7 +5,7 @@ import { botConfigStore } from '../store/botConfigStore';
 
 type DerivMessage =
   | { msg_type: 'authorize'; authorize: { loginid: string } }
-  | { msg_type: 'tick'; tick: { symbol: string; quote: number; epoch: number; id?: string } }
+  | { msg_type: 'tick'; tick: { symbol: string; quote: number; epoch: number; id?: string; subscription?: { id?: string } } }
   | { msg_type: 'ticks'; ticks: any }
   | { msg_type: 'proposal'; proposal: { id: string; ask_price: number; longcode: string } }
   | { msg_type: 'buy'; buy: { buy_price: number; transaction_id: number; contract_id: number } }
@@ -29,6 +29,7 @@ class DerivClient {
   appId: string | undefined;
   token: string | undefined;
   tickSubs: Map<string, string> = new Map(); // symbol -> subscription id
+  subscribedSymbols: Set<string> = new Set(); // remember desired subs across reconnects
   pocSubs: Set<number> = new Set(); // subscribed contract_ids
   lastConnectTs = 0;
 
@@ -54,6 +55,20 @@ class DerivClient {
       if (this.token) {
         this.authorize(this.token).catch((e) => console.log('Authorize on reconnect failed', e));
       }
+      // Re-subscribe to symbols after connection established
+      const symbols = Array.from(this.subscribedSymbols);
+      if (symbols.length) {
+        console.log('Re-subscribing to symbols after reconnect:', symbols.join(','));
+        symbols.forEach((s) => {
+          // clear any old sub id and request a fresh subscription
+          this.tickSubs.delete(s);
+          try {
+            this.ws?.send(JSON.stringify({ ticks: s, subscribe: 1 }));
+          } catch (err) {
+            console.log('Resubscribe send error', err);
+          }
+        });
+      }
     };
 
     this.ws.onclose = (e) => {
@@ -63,6 +78,8 @@ class DerivClient {
       derivStore.set({ status: 'disconnected' });
       this.pending.forEach((p) => p.reject(new Error('Socket closed')));
       this.pending.clear();
+      // Clear current subscription ids; we'll resubscribe on reconnect
+      this.tickSubs.clear();
       // try reconnect with small delay
       setTimeout(() => {
         if (this.appId) this.connect(this.appId).catch((err) => console.log('Reconnect failed', err));
@@ -117,8 +134,8 @@ class DerivClient {
     }
 
     if (msg.msg_type === 'error') {
-      console.log('Deriv error:', msg.error?.code, msg.error?.message, msg.error?.details);
-      derivStore.set({ lastError: msg.error?.message || 'Deriv error' });
+      console.log('Deriv error:', (msg as any).error?.code, (msg as any).error?.message, (msg as any).error?.details);
+      derivStore.set({ lastError: (msg as any).error?.message || 'Deriv error' });
       return;
     }
 
@@ -128,8 +145,13 @@ class DerivClient {
       derivStore.set({ status: 'authorized' });
     }
 
-    if (msg.msg_type === 'tick' && msg.tick) {
-      const { symbol, quote, epoch } = msg.tick;
+    if (msg.msg_type === 'tick' && (msg as any).tick) {
+      const { symbol, quote, epoch, id, subscription } = (msg as any).tick;
+      // persist subscription id if not stored
+      const subId = id || subscription?.id;
+      if (subId && !this.tickSubs.get(symbol)) {
+        this.tickSubs.set(symbol, subId);
+      }
       derivStore.updateTick(symbol, quote, epoch);
     }
 
@@ -141,7 +163,6 @@ class DerivClient {
       // Update open trade status in store
       const isSold = poc.is_sold;
       const currentSpot = poc.current_spot || 0;
-      const entrySpot = poc.entry_spot || 0;
       const pnl = (poc.profit || 0);
       const symbol = poc.underlying || 'UNKNOWN';
       tradeStore.updateOpenContract(contractId, {
@@ -175,8 +196,9 @@ class DerivClient {
 
   async subscribeTicks(symbol: string) {
     if (this.tickSubs.has(symbol)) return; // already
+    this.subscribedSymbols.add(symbol);
     const res: any = await this.send({ ticks: symbol, subscribe: 1 });
-    const subId = res?.tick?.id || res?.subscription?.id || (res?.echo_req && res?.echo_req.req_id) || undefined;
+    const subId = (res as any)?.tick?.id || (res as any)?.subscription?.id || (res as any)?.tick?.subscription?.id;
     if (subId) {
       this.tickSubs.set(symbol, subId);
     }
@@ -185,6 +207,7 @@ class DerivClient {
 
   async unsubscribeTicks(symbol: string) {
     const id = this.tickSubs.get(symbol);
+    this.subscribedSymbols.delete(symbol);
     if (!id) return;
     this.tickSubs.delete(symbol);
     try {
@@ -228,6 +251,22 @@ class DerivClient {
     return res.proposal;
   }
 
+  async proposeFall(symbol: string, stakeUSD: number) {
+    const payload = {
+      proposal: 1,
+      amount: stakeUSD,
+      basis: 'stake',
+      contract_type: 'PUT',
+      currency: 'USD',
+      duration: 1,
+      duration_unit: 'm',
+      symbol,
+    };
+    const res: any = await this.send(payload);
+    if (res.error) throw res.error;
+    return res.proposal;
+  }
+
   async buyFromProposal(proposalId: string, price: number) {
     const res: any = await this.send({ buy: proposalId, price });
     if (res.error) throw res.error;
@@ -239,7 +278,7 @@ class DerivClient {
       const prop = await this.proposeRise(symbol, stakeUSD);
       const bought = await this.buyFromProposal(prop.id, prop.ask_price);
       const { contract_id } = bought;
-      console.log('Bought contract', contract_id, symbol);
+      console.log('Bought CALL contract', contract_id, symbol);
 
       // Track as open trade
       const entry = derivStore.getLastPrice(symbol)?.quote || 0;
@@ -251,6 +290,8 @@ class DerivClient {
         startTime: Date.now(),
         status: 'open',
         pnl: 0,
+        currentSpot: entry,
+        contractType: 'CALL',
       });
 
       // Subscribe to proposal_open_contract updates
@@ -261,6 +302,40 @@ class DerivClient {
       return contract_id;
     } catch (e) {
       console.log('Buy rise failed', e);
+      derivStore.set({ lastError: (e as any)?.message || 'Buy failed' });
+      throw e;
+    }
+  }
+
+  async buyFall(symbol: string, stakeUSD: number) {
+    try {
+      const prop = await this.proposeFall(symbol, stakeUSD);
+      const bought = await this.buyFromProposal(prop.id, prop.ask_price);
+      const { contract_id } = bought;
+      console.log('Bought PUT contract', contract_id, symbol);
+
+      // Track as open trade
+      const entry = derivStore.getLastPrice(symbol)?.quote || 0;
+      tradeStore.addOpenTrade({
+        contractId: contract_id,
+        symbol,
+        entry,
+        stake: stakeUSD,
+        startTime: Date.now(),
+        status: 'open',
+        pnl: 0,
+        currentSpot: entry,
+        contractType: 'PUT',
+      });
+
+      // Subscribe to proposal_open_contract updates
+      if (!this.pocSubs.has(contract_id)) {
+        this.pocSubs.add(contract_id);
+        this.ws?.send(JSON.stringify({ proposal_open_contract: 1, contract_id, subscribe: 1 }));
+      }
+      return contract_id;
+    } catch (e) {
+      console.log('Buy fall failed', e);
       derivStore.set({ lastError: (e as any)?.message || 'Buy failed' });
       throw e;
     }

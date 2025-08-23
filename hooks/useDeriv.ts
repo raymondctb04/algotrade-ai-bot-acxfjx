@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { derivClient } from '../services/derivClient';
 import { derivStore } from '../store/derivStore';
 import { botConfigStore } from '../store/botConfigStore';
@@ -39,12 +39,18 @@ export default function useDeriv() {
     return derivClient.buyRise(symbol, stake);
   };
 
+  const buyFall = async (symbol: string, stake: number) => {
+    await ensureConnected();
+    return derivClient.buyFall(symbol, stake);
+  };
+
   return {
     ...state,
     ensureConnected,
     subscribeSymbols,
     unsubscribeAll,
     buyRise,
+    buyFall,
     getLastPrice: (s: string) => derivStore.getLastPrice(s),
     getSeries: (s: string) => derivStore.getSeries(s),
   };

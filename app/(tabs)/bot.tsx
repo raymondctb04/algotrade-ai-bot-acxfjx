@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { colors, commonStyles } from '../../styles/commonStyles';
 import Button from '../../components/Button';
@@ -14,7 +14,7 @@ type Signal = {
   symbol: string;
   confluence: number;
   entry: number;
-  type: 'LONG' | 'FLAT';
+  type: 'LONG' | 'SHORT';
 };
 
 function sma(arr: number[], len: number) {
@@ -93,29 +93,46 @@ export default function BotScreen() {
         const smaFast = sma(series, 10);
         const smaSlow = sma(series, 30);
         const momentumUp = smaFast !== null && smaSlow !== null ? smaFast > smaSlow : false;
+        const momentumDown = smaFast !== null && smaSlow !== null ? smaFast < smaSlow : false;
 
         const r = rsi(series, 14) ?? 50;
-        const scalpOK = r < 35;
+        const scalpLongOK = r < 35;
+        const scalpShortOK = r > 65;
 
-        const meanOK = smaSlow !== null ? last < smaSlow * 0.995 : false;
+        const meanLongOK = smaSlow !== null ? last < smaSlow * 0.995 : false;
+        const meanShortOK = smaSlow !== null ? last > smaSlow * 1.005 : false;
 
-        let score = 0;
-        let checks = 0;
+        // LONG confluence
+        let scoreL = 0;
+        let checksL = 0;
+        checksL += 1; if (momentumUp) scoreL += 1;
+        checksL += 1; if (scalpLongOK) scoreL += 1;
+        checksL += 1; if (meanLongOK) scoreL += 1;
+        const confL = scoreL / Math.max(checksL, 1);
 
-        checks += 1; if (momentumUp) score += 1;
-        checks += 1; if (scalpOK) score += 1;
-        checks += 1; if (meanOK) score += 1;
+        // SHORT confluence
+        let scoreS = 0;
+        let checksS = 0;
+        checksS += 1; if (momentumDown) scoreS += 1;
+        checksS += 1; if (scalpShortOK) scoreS += 1;
+        checksS += 1; if (meanShortOK) scoreS += 1;
+        const confS = scoreS / Math.max(checksS, 1);
 
-        const confluence = score / Math.max(checks, 1);
-        const shouldLong = confluence >= confluenceThreshold;
-
-        if (shouldLong) {
+        if (confL >= confluenceThreshold) {
           nextSignals.push({
             t: now,
             symbol,
-            confluence,
+            confluence: confL,
             entry: last,
             type: 'LONG',
+          });
+        } else if (confS >= confluenceThreshold) {
+          nextSignals.push({
+            t: now,
+            symbol,
+            confluence: confS,
+            entry: last,
+            type: 'SHORT',
           });
         }
       });
@@ -130,7 +147,11 @@ export default function BotScreen() {
         if (config.apiProvider === 'deriv' && (config.apiToken || '').length > 0 && (config.derivAppId || '').length > 0) {
           nextSignals.forEach(async (s) => {
             try {
-              await deriv.buyRise(s.symbol, config.tradeStake || 1);
+              if (s.type === 'LONG') {
+                await deriv.buyRise(s.symbol, config.tradeStake || 1);
+              } else {
+                await deriv.buyFall(s.symbol, config.tradeStake || 1);
+              }
             } catch (e) {
               console.log('Auto trade failed', e);
             }
@@ -208,7 +229,7 @@ export default function BotScreen() {
               {openTrades.map((t) => (
                 <View key={t.contractId} style={styles.tradeRow}>
                   <Text style={styles.tradeText}>
-                    #{t.contractId} • {t.symbol} • Entry {t.entry.toFixed(5)} • Stake ${t.stake} • PnL ${t.pnl?.toFixed(2)}
+                    #{t.contractId} • {t.symbol} • {t.contractType || '—'} • Entry {t.entry.toFixed(5)} • Stake ${t.stake} • PnL ${t.pnl?.toFixed(2)}
                   </Text>
                 </View>
               ))}

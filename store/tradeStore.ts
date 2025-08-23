@@ -8,6 +8,7 @@ type OpenTrade = {
   status: 'open' | 'closed';
   pnl: number;
   currentSpot?: number;
+  contractType?: 'CALL' | 'PUT';
 };
 
 type TradeLog = {
