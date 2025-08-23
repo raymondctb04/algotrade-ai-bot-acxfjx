@@ -84,7 +84,7 @@ export default function DashboardScreen() {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.row}>
-            <Button text="Open Settings" onPress={() => (window as any).openSettingsSheet?.()} style={styles.chip} />
+            <Button text="Open Settings" onPress={() => (globalThis as any).openSettingsSheet?.()} style={styles.chip} />
             <Button text="Manage Assets" onPress={() => router.push('/(tabs)/assets')} style={styles.chip} />
             <Button text="Go to Bot" onPress={() => router.push('/(tabs)/bot')} style={styles.chip} />
           </View>

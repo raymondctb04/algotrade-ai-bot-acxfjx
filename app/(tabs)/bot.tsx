@@ -152,23 +152,35 @@ export default function BotScreen() {
 
   const start = async () => {
     if (!canRun) {
-      console.log('No assets configured');
+      console.log('Start blocked: No assets configured.');
       return;
     }
     try {
-      await deriv.ensureConnected();
-      await deriv.subscribeSymbols(assets);
-      // Subscribe candles for the required timeframes
-      await deriv.subscribeCandlesMultiple(assets, TF_LIST.map((t) => t.sec));
+      console.log('Starting bot with', { assetsCount: assets.length, provider: config.apiProvider });
+      if (config.apiProvider === 'deriv') {
+        await deriv.ensureConnected();
+        await deriv.subscribeSymbols(assets);
+        // Subscribe candles for the required timeframes
+        await deriv.subscribeCandlesMultiple(assets, TF_LIST.map((t) => t.sec));
+      }
       console.log('Bot started');
       setRunning(true);
     } catch (e) {
       console.log('Failed to start bot', e);
     }
   };
-  const stop = () => {
-    console.log('Bot stopped');
+  const stop = async () => {
+    console.log('Stopping bot...');
+    try {
+      if (config.apiProvider === 'deriv') {
+        await deriv.unsubscribeAll();
+      }
+    } catch (e) {
+      console.log('Unsubscribe error on stop', e);
+    }
+    lastCrossSideRef.current = {};
     setRunning(false);
+    console.log('Bot stopped');
   };
 
   // Evaluate signals on intervals based on candles
@@ -247,10 +259,8 @@ export default function BotScreen() {
           } else if (crossDown && macdAlignShort && rsiShort) {
             if (lastSide !== 'down') {
               const atrSL = entry + atr;
-              const sl = Math.max(swingHigh, atrSL); // for short, stop above entry, pick tighter by using max? We want min distance -> choose closer stop, so use Math.min of distances. Compute distances explicitly.
-              // Recompute to respect 'min(swing, ATR-based)' in terms of distance
               const slSwing = swingHigh;
-              const slAtrBased = entry + atr;
+              const slAtrBased = atrSL;
               const chosenSL = Math.min(slSwing - entry, slAtrBased - entry) === slSwing - entry ? slSwing : slAtrBased;
               const risk = Math.max(1e-6, chosenSL - entry);
               const tp = entry - 2 * risk;
@@ -270,8 +280,7 @@ export default function BotScreen() {
               lastCrossSideRef.current[key] = 'down';
             }
           } else {
-            // If EMAs cross opposite, we update side; already handled above.
-            // If EMAs uncross (no side), we keep last side.
+            // keep last side
           }
         });
       }
@@ -321,7 +330,7 @@ export default function BotScreen() {
             ) : (
               <Button text="Stop Bot" onPress={stop} style={[styles.chip, { backgroundColor: '#c62828' }]} />
             )}
-            <Button text="Open Settings" onPress={() => (window as any).openSettingsSheet?.()} style={styles.chip} />
+            <Button text="Open Settings" onPress={() => (globalThis as any).openSettingsSheet?.()} style={styles.chip} />
             <Button text={showPine ? 'Hide Pine Script' : 'Show Pine Script'} onPress={() => setShowPine(v => !v)} style={styles.chip} />
           </View>
           <Text style={styles.helper}>

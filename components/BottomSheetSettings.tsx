@@ -15,12 +15,12 @@ export default function BottomSheetSettings({ config, onChange }: Props) {
   const sheetRef = useRef<BottomSheet>(null);
 
   useEffect(() => {
-    (window as any).openSettingsSheet = () => {
+    (globalThis as any).openSettingsSheet = () => {
       console.log('Opening settings bottom sheet');
       sheetRef.current?.expand();
     };
     return () => {
-      (window as any).openSettingsSheet = undefined;
+      (globalThis as any).openSettingsSheet = undefined;
     };
   }, []);
 

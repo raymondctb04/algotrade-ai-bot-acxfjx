@@ -33,8 +33,7 @@ export default function AssetsScreen() {
     const syms = filteredAssets.map((a) => a.symbol);
     deriv.subscribeSymbols(syms).catch((e) => console.log('Subscribe error', e));
     return () => {
-      // We keep subscriptions (selected assets) but for screen we can leave on to keep updating while browsing.
-      // If you want to aggressively unsubscribe, call deriv.unsubscribeAll() here.
+      // Keeping subs is okay for smoother browsing
     };
   }, [filteredAssets.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -84,7 +83,7 @@ export default function AssetsScreen() {
           </View>
           <View style={styles.row}>
             <Button text="Add Everything" onPress={() => handleAddGroup('all')} style={styles.chip} />
-            <Button text="Open Settings" onPress={() => (window as any).openSettingsSheet?.()} style={styles.chip} />
+            <Button text="Open Settings" onPress={() => (globalThis as any).openSettingsSheet?.()} style={styles.chip} />
           </View>
           <Text style={styles.helper}>
             Selected: {config.assets.length ? config.assets.join(', ') : 'None'}

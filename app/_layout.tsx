@@ -7,6 +7,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { commonStyles } from '../styles/commonStyles';
 import { useEffect, useState } from 'react';
 import { setupErrorLogging } from '../utils/errorLogger';
+import BottomSheetSettings from '../components/BottomSheetSettings';
+import useBotConfig from '../hooks/useBotConfig';
 
 const STORAGE_KEY = 'emulated_device';
 
@@ -14,6 +16,7 @@ export default function RootLayout() {
   const actualInsets = useSafeAreaInsets();
   const { emulate } = useGlobalSearchParams<{ emulate?: string }>();
   const [storedEmulate, setStoredEmulate] = useState<string | null>(null);
+  const { config, setConfig } = useBotConfig();
 
   useEffect(() => {
     setupErrorLogging();
@@ -66,6 +69,11 @@ export default function RootLayout() {
               animation: 'default',
             }}
           />
+
+          {/*
+            Mount settings bottom sheet globally so any screen can open it via globalThis.openSettingsSheet()
+          */}
+          <BottomSheetSettings config={config} onChange={setConfig} />
         </SafeAreaView>
       </SafeAreaProvider>
     </GestureHandlerRootView>
