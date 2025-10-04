@@ -1,14 +1,18 @@
+
 import { StyleSheet, ViewStyle, TextStyle } from 'react-native';
 
 export const colors = {
-  primary: '#162456',    // Material Blue
-  secondary: '#193cb8',  // Darker Blue
-  accent: '#64B5F6',     // Light Blue
-  background: '#101824',  // Keeping dark background
-  backgroundAlt: '#162133',  // Keeping dark background
-  text: '#e3e3e3',       // Keeping light text
-  grey: '#90CAF9',       // Light Blue Grey
-  card: '#193cb8',       // Keeping dark card background
+  primary: '#1e88e5',      // Sea Blue
+  secondary: '#ffffff',     // White
+  accent: '#81c784',       // Light Green
+  background: '#0d47a1',   // Deep Sea Blue
+  backgroundAlt: '#1565c0', // Medium Sea Blue
+  text: '#ffffff',         // White text
+  grey: '#90caf9',         // Light Blue Grey
+  card: '#1976d2',         // Card Sea Blue
+  success: '#4caf50',      // Green for success
+  error: '#f44336',        // Red for errors
+  warning: '#ff9800',      // Orange for warnings
 };
 
 export const buttonStyles = StyleSheet.create({
@@ -84,6 +88,6 @@ export const commonStyles = StyleSheet.create({
   icon: {
     width: 60,
     height: 60,
-    tintColor: "white",
+    tintColor: colors.text,
   },
 });

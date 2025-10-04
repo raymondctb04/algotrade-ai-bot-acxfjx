@@ -34,6 +34,9 @@ export type Signal = {
   atr: number;
   sl: number;
   tp: number;
+  confidence: number;
+  bollingerPosition: string;
+  trendStrength: number;
 };
 
 function ema(values: number[], period: number) {
@@ -75,7 +78,6 @@ function calcMACD(values: number[], fast = 12, slow = 26, signal = 9) {
     const f = emaFast[i];
     const s = emaSlow[i];
     return f != null && s != null ? (f as number) - (s as number) : null;
-    
   });
   const macdVals = macdLine.map((v) => (v == null ? null : (v as number)));
   const macdClean = macdVals.filter((v): v is number => v != null);
@@ -115,10 +117,76 @@ function calcATR(highs: number[], lows: number[], closes: number[], period = 14)
   return atr;
 }
 
+// Bollinger Bands calculation for mean reversion
+function calcBollingerBands(values: number[], period = 20, stdDev = 2) {
+  if (values.length < period) return { upper: null, middle: null, lower: null };
+  
+  const recentValues = values.slice(-period);
+  const sma = recentValues.reduce((a, b) => a + b, 0) / period;
+  
+  const variance = recentValues.reduce((sum, val) => sum + Math.pow(val - sma, 2), 0) / period;
+  const standardDeviation = Math.sqrt(variance);
+  
+  return {
+    upper: sma + (standardDeviation * stdDev),
+    middle: sma,
+    lower: sma - (standardDeviation * stdDev)
+  };
+}
+
+// Mean reversion signal check
+function checkMeanReversion(price: number, bollingerBands: any, rsi: number) {
+  if (!bollingerBands.upper || !bollingerBands.lower) return { isOversold: false, isOverbought: false, position: 'middle' };
+  
+  const isOversold = price <= bollingerBands.lower && rsi < 30;
+  const isOverbought = price >= bollingerBands.upper && rsi > 70;
+  
+  let position = 'middle';
+  if (price <= bollingerBands.lower) position = 'lower';
+  else if (price >= bollingerBands.upper) position = 'upper';
+  
+  return { isOversold, isOverbought, position };
+}
+
+// Calculate trend strength using multiple EMAs
+function calcTrendStrength(closes: number[]) {
+  if (closes.length < 50) return 0;
+  
+  const ema9 = ema(closes, 9);
+  const ema21 = ema(closes, 21);
+  const ema50 = ema(closes, 50);
+  
+  if (!ema9 || !ema21 || !ema50) return 0;
+  
+  // Calculate trend alignment score (0-100)
+  let score = 0;
+  
+  // EMA alignment (bullish: 9 > 21 > 50, bearish: 9 < 21 < 50)
+  if (ema9 > ema21 && ema21 > ema50) score += 40; // Strong bullish alignment
+  else if (ema9 < ema21 && ema21 < ema50) score -= 40; // Strong bearish alignment
+  else if (ema9 > ema21) score += 20; // Partial bullish
+  else if (ema9 < ema21) score -= 20; // Partial bearish
+  
+  // Price momentum
+  const currentPrice = closes[closes.length - 1];
+  const priceVsEma9 = ((currentPrice - ema9) / ema9) * 100;
+  score += Math.max(-30, Math.min(30, priceVsEma9 * 10));
+  
+  return Math.max(-100, Math.min(100, score));
+}
+
+// Dynamic position sizing based on ATR and account risk
+function calculatePositionSize(accountBalance: number, atr: number, riskPercentage = 0.01) {
+  const riskAmount = accountBalance * riskPercentage;
+  const positionSize = Math.max(0.35, Math.min(100, riskAmount / (atr * 100))); // Min $0.35, Max $100
+  return positionSize;
+}
+
 function getSwingLow(lows: number[], lookback = 10) {
   if (lows.length < lookback) return null;
   return Math.min(...lows.slice(-lookback));
 }
+
 function getSwingHigh(highs: number[], lookback = 10) {
   if (highs.length < lookback) return null;
   return Math.max(...highs.slice(-lookback));
@@ -157,18 +225,17 @@ export default function BotScreen() {
     
     setStartingBot(true);
     try {
-      console.log('Starting bot with', { assetsCount: assets.length, provider: config.apiProvider });
+      console.log('Starting enhanced bot with', { assetsCount: assets.length, provider: config.apiProvider });
       if (config.apiProvider === 'deriv') {
         await deriv.ensureConnected();
         await deriv.subscribeSymbols(assets);
         // Subscribe candles for the required timeframes
         await deriv.subscribeCandlesMultiple(assets, TF_LIST.map((t) => t.sec));
       }
-      console.log('Bot started successfully');
+      console.log('Enhanced bot started successfully');
       setRunning(true);
     } catch (e) {
       console.log('Failed to start bot', e);
-      // Don't throw here, just log the error
     } finally {
       setStartingBot(false);
     }
@@ -186,14 +253,13 @@ export default function BotScreen() {
       console.log('Bot stopped successfully');
     } catch (e) {
       console.log('Error stopping bot', e);
-      // Still set running to false even if unsubscribe fails
       setRunning(false);
     } finally {
       setStoppingBot(false);
     }
   };
 
-  // Evaluate signals on intervals based on candles
+  // Enhanced signal evaluation with trend, mean reversion, and ATR
   useEffect(() => {
     if (!running) return;
     
@@ -203,7 +269,6 @@ export default function BotScreen() {
         const newSignals: Signal[] = [];
 
         for (const symbol of assets) {
-          // Pull candles for all timeframes
           const perTF = TF_LIST.map((tf) => {
             const candles = deriv.getCandles(symbol, tf.sec);
             const closes = candles.map((c: any) => Number(c.close));
@@ -215,44 +280,77 @@ export default function BotScreen() {
           perTF.forEach(({ tf, candles, closes, highs, lows }) => {
             if (candles.length < 60) return; // ensure enough data
 
-            // 9/21 EMA
+            // Calculate all indicators
             const ema9Series = seriesEma(closes, 9);
             const ema21Series = seriesEma(closes, 21);
             const e9prev = ema9Series[ema9Series.length - 2];
             const e21prev = ema21Series[ema21Series.length - 2];
             const e9 = ema9Series[ema9Series.length - 1];
             const e21 = ema21Series[ema21Series.length - 1];
+            
             if (e9 == null || e21 == null || e9prev == null || e21prev == null) return;
 
             const crossUp = (e9prev as number) <= (e21prev as number) && (e9 as number) > (e21 as number);
             const crossDown = (e9prev as number) >= (e21prev as number) && (e9 as number) < (e21 as number);
 
-            // MACD + RSI confluence
+            // MACD + RSI
             const macd = calcMACD(closes);
             const rsi = calcRSI(closes, 14);
             if (macd.macd == null || macd.signal == null || rsi == null) return;
+
+            // Bollinger Bands for mean reversion
+            const bollingerBands = calcBollingerBands(closes, 20, 2);
+            const currentPrice = closes[closes.length - 1];
+            const meanReversion = checkMeanReversion(currentPrice, bollingerBands, rsi);
+
+            // Trend strength
+            const trendStrength = calcTrendStrength(closes);
+
+            // ATR for volatility and position sizing
+            const atr = calcATR(highs, lows, closes, 14) || 0;
+            const accountBalance = 1000; // Default account balance for position sizing
+            const dynamicStake = calculatePositionSize(accountBalance, atr, 0.01);
+
+            // Enhanced signal logic combining trend, mean reversion, and volatility
             const macdAlignLong = (macd.macd as number) > (macd.signal as number);
             const macdAlignShort = (macd.macd as number) < (macd.signal as number);
-            const rsiLong = (rsi as number) > 50;
-            const rsiShort = (rsi as number) < 50;
+            
+            // Calculate confidence score (0-100)
+            let confidence = 0;
+            
+            // Trend component (40% weight)
+            if (trendStrength > 30) confidence += 40;
+            else if (trendStrength > 0) confidence += 20;
+            else if (trendStrength < -30) confidence += 40; // Strong bearish also good for shorts
+            else if (trendStrength < 0) confidence += 20;
+
+            // Mean reversion component (30% weight)
+            if (meanReversion.isOversold || meanReversion.isOverbought) confidence += 30;
+            else if (meanReversion.position !== 'middle') confidence += 15;
+
+            // Technical confluence (30% weight)
+            if (macdAlignLong && rsi > 45 && rsi < 75) confidence += 15;
+            if (macdAlignShort && rsi > 25 && rsi < 55) confidence += 15;
+            if (atr > 0) confidence += 15; // Volatility present
 
             // Prevent duplicates per symbol+tf until next opposite cross
             const key = `${symbol}::${tf.sec}`;
             const lastSide = lastCrossSideRef.current[key];
 
-            const atr = calcATR(highs, lows, closes, 14) || 0;
             const entry = closes[closes.length - 1];
-            // Swings
-            const swingLow = getSwingLow(lows, 10) ?? entry - atr; // fallback
+            const swingLow = getSwingLow(lows, 10) ?? entry - atr;
             const swingHigh = getSwingHigh(highs, 10) ?? entry + atr;
 
-            if (crossUp && macdAlignLong && rsiLong) {
+            // Enhanced LONG signal: Trend + Mean Reversion + Technical confluence
+            if (crossUp && macdAlignLong && 
+                (trendStrength > 0 || meanReversion.isOversold) && 
+                confidence >= 60) {
               if (lastSide !== 'up') {
-                // SL = min(swing, ATR-based)
-                const atrSL = entry - atr;
+                const atrSL = entry - (atr * 1.5); // 1.5x ATR for stop loss
                 const sl = Math.min(swingLow, atrSL);
                 const risk = Math.max(1e-6, entry - sl);
-                const tp = entry + 2 * risk;
+                const tp = entry + 2 * risk; // 1:2 risk-reward
+
                 newSignals.unshift({
                   t: now,
                   symbol,
@@ -265,17 +363,23 @@ export default function BotScreen() {
                   atr,
                   sl,
                   tp,
+                  confidence,
+                  bollingerPosition: meanReversion.position,
+                  trendStrength,
                 });
                 lastCrossSideRef.current[key] = 'up';
               }
-            } else if (crossDown && macdAlignShort && rsiShort) {
+            } 
+            // Enhanced SHORT signal: Trend + Mean Reversion + Technical confluence
+            else if (crossDown && macdAlignShort && 
+                     (trendStrength < 0 || meanReversion.isOverbought) && 
+                     confidence >= 60) {
               if (lastSide !== 'down') {
-                const atrSL = entry + atr;
-                const slSwing = swingHigh;
-                const slAtrBased = atrSL;
-                const chosenSL = Math.min(slSwing - entry, slAtrBased - entry) === slSwing - entry ? slSwing : slAtrBased;
-                const risk = Math.max(1e-6, chosenSL - entry);
-                const tp = entry - 2 * risk;
+                const atrSL = entry + (atr * 1.5); // 1.5x ATR for stop loss
+                const sl = Math.max(swingHigh, atrSL);
+                const risk = Math.max(1e-6, sl - entry);
+                const tp = entry - 2 * risk; // 1:2 risk-reward
+
                 newSignals.unshift({
                   t: now,
                   symbol,
@@ -286,13 +390,14 @@ export default function BotScreen() {
                   macd: macd.macd as number,
                   macdSignal: macd.signal as number,
                   atr,
-                  sl: chosenSL,
+                  sl,
                   tp,
+                  confidence,
+                  bollingerPosition: meanReversion.position,
+                  trendStrength,
                 });
                 lastCrossSideRef.current[key] = 'down';
               }
-            } else {
-              // keep last side
             }
           });
         }
@@ -303,30 +408,34 @@ export default function BotScreen() {
             return merged.slice(0, 80);
           });
 
-          // Auto-trade per signal
+          // Auto-trade with dynamic position sizing
           if (config.apiProvider === 'deriv' && (config.apiToken || '').length > 0 && (config.derivAppId || '').length > 0) {
             newSignals.forEach(async (s) => {
               try {
+                // Use higher confidence signals for larger stakes
+                const adjustedStake = s.confidence >= 80 ? 
+                  Math.min(config.tradeStake * 1.5, 100) : 
+                  config.tradeStake || 1;
+
                 if (s.type === 'LONG') {
-                  await deriv.buyRise(s.symbol, config.tradeStake || 1);
+                  await deriv.buyRise(s.symbol, adjustedStake);
                 } else {
-                  await deriv.buyFall(s.symbol, config.tradeStake || 1);
+                  await deriv.buyFall(s.symbol, adjustedStake);
                 }
+                console.log(`Executed ${s.type} trade for ${s.symbol} with confidence ${s.confidence}%`);
               } catch (e) {
                 console.log('Auto trade failed for signal', s.symbol, s.type, e);
-                // Don't throw here, just log the error
               }
             });
           }
         }
       } catch (error) {
-        console.log('Error in signal evaluation:', error);
-        // Don't throw here, just log the error
+        console.log('Error in enhanced signal evaluation:', error);
       }
     }, 2000);
 
     return () => clearInterval(timer);
-  }, [running, assets, config.apiProvider, config.apiToken, config.derivAppId, config.tradeStake, deriv]); // eslint-disable-line
+  }, [running, assets, config.apiProvider, config.apiToken, config.derivAppId, config.tradeStake, deriv]);
 
   const handleStartBot = () => {
     start().catch(error => {
@@ -355,39 +464,42 @@ export default function BotScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={commonStyles.title}>EMA 9/21 MACD+RSI Bot</Text>
+        <Text style={commonStyles.title}>Enhanced Multi-Strategy Trading Bot</Text>
         <Text style={commonStyles.text}>
-          {canRun ? 'Start to subscribe candles (5m,15m,1h,4h), generate signals, and auto-trade on Deriv.' : 'Add assets on the Assets tab first.'}
+          {canRun ? 'Advanced bot with trend following, mean reversion, and ATR-based risk management.' : 'Add assets on the Assets tab first.'}
         </Text>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Trading Strategy</Text>
+          <Text style={styles.sectionTitle}>Enhanced Trading Strategy</Text>
           <Text style={styles.strategyText}>
-            • <Text style={styles.highlight}>Primary Signal</Text>: 9/21 EMA crossover
+            • <Text style={styles.highlight}>Trend Following</Text>: EMA 9/21 crossover with trend strength analysis
           </Text>
           <Text style={styles.strategyText}>
-            • <Text style={styles.highlight}>MACD Confluence</Text>: MACD line vs signal line alignment
+            • <Text style={styles.highlight}>Mean Reversion</Text>: Bollinger Bands with RSI oversold/overbought levels
           </Text>
           <Text style={styles.strategyText}>
-            • <Text style={styles.highlight}>RSI Filter</Text>: RSI > 50 for longs, RSI < 50 for shorts
+            • <Text style={styles.highlight}>Volatility (ATR)</Text>: Dynamic stop-loss and position sizing
           </Text>
           <Text style={styles.strategyText}>
-            • <Text style={styles.highlight}>Risk Management</Text>: Stop-loss based on swing/ATR, 1:2 R:R
+            • <Text style={styles.highlight}>MACD Confluence</Text>: Signal line crossover confirmation
           </Text>
           <Text style={styles.strategyText}>
-            • <Text style={styles.highlight}>Timeframes</Text>: 5m, 15m, 1h, 4h analysis
+            • <Text style={styles.highlight}>Confidence Scoring</Text>: Multi-indicator confluence (60%+ required)
           </Text>
           <Text style={styles.strategyText}>
-            • <Text style={styles.highlight}>Execution</Text>: 1-minute CALL/PUT contracts on Deriv
+            • <Text style={styles.highlight}>Risk Management</Text>: 1.5x ATR stop-loss, 1:2 risk-reward ratio
+          </Text>
+          <Text style={styles.strategyText}>
+            • <Text style={styles.highlight}>Dynamic Sizing</Text>: Higher stakes for high-confidence signals
           </Text>
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Controls</Text>
+          <Text style={styles.sectionTitle}>Bot Controls</Text>
           <View style={styles.row}>
             {!running ? (
               <Button 
-                text={startingBot ? "Starting..." : "Start Bot"} 
+                text={startingBot ? "Starting..." : "Start Enhanced Bot"} 
                 onPress={handleStartBot} 
                 style={[styles.chip, startingBot && { opacity: 0.6 }]}
                 disabled={startingBot}
@@ -396,33 +508,40 @@ export default function BotScreen() {
               <Button 
                 text={stoppingBot ? "Stopping..." : "Stop Bot"} 
                 onPress={handleStopBot} 
-                style={[styles.chip, { backgroundColor: '#c62828' }, stoppingBot && { opacity: 0.6 }]}
+                style={[styles.chip, { backgroundColor: colors.error }, stoppingBot && { opacity: 0.6 }]}
                 disabled={stoppingBot}
               />
             )}
-            <Button text="Open Settings" onPress={handleOpenSettings} style={styles.chip} />
+            <Button text="Open Settings" onPress={handleOpenSettings} style={[styles.chip, { backgroundColor: colors.accent }]} />
           </View>
           <Text style={styles.helper}>
-            Assets: {assets.length ? assets.join(', ') : 'None'} | Stake: ${config.tradeStake || 1}
+            Assets: {assets.length ? assets.join(', ') : 'None'} | Base Stake: ${config.tradeStake || 1}
           </Text>
           <Text style={styles.helper}>
-            Deriv: {deriv?.status} {deriv?.lastError ? `• ${deriv.lastError}` : ''}
+            Deriv Status: {deriv?.status} {deriv?.lastError ? `• ${deriv.lastError}` : ''}
           </Text>
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Recent Signals</Text>
+          <Text style={styles.sectionTitle}>Recent Enhanced Signals</Text>
           {!signals.length ? (
-            <Text style={styles.helper}>No signals yet. Start the bot to begin signal generation.</Text>
+            <Text style={styles.helper}>No signals yet. Start the bot to begin enhanced signal generation.</Text>
           ) : (
             <View style={{ gap: 8 }}>
               {signals.map((s) => (
-                <View key={`${s.symbol}-${s.t}-${s.type}-${s.timeframe}`} style={styles.signalRow}>
+                <View key={`${s.symbol}-${s.t}-${s.type}-${s.timeframe}`} style={[
+                  styles.signalRow,
+                  { borderLeftWidth: 4, borderLeftColor: s.confidence >= 80 ? colors.accent : colors.primary }
+                ]}>
                   <Text style={styles.signalText}>
-                    {new Date(s.t).toLocaleTimeString()} • {s.symbol} • {s.timeframe} • {s.type} • entry {s.entry.toFixed(5)}
+                    {new Date(s.t).toLocaleTimeString()} • {s.symbol} • {s.timeframe} • {s.type} • Entry: {s.entry.toFixed(5)}
                   </Text>
                   <Text style={styles.signalTextSmall}>
-                    RSI {s.rsi.toFixed(1)} • MACD {s.macd.toFixed(5)} vs Sig {s.macdSignal.toFixed(5)} • ATR {s.atr.toFixed(5)} • SL {s.sl.toFixed(5)} • TP {s.tp.toFixed(5)}
+                    Confidence: <Text style={{ color: s.confidence >= 80 ? colors.accent : colors.primary }}>{s.confidence}%</Text> • 
+                    RSI: {s.rsi.toFixed(1)} • Trend: {s.trendStrength.toFixed(1)} • BB: {s.bollingerPosition}
+                  </Text>
+                  <Text style={styles.signalTextSmall}>
+                    MACD: {s.macd.toFixed(5)} vs {s.macdSignal.toFixed(5)} • ATR: {s.atr.toFixed(5)} • SL: {s.sl.toFixed(5)} • TP: {s.tp.toFixed(5)}
                   </Text>
                 </View>
               ))}
@@ -439,7 +558,10 @@ export default function BotScreen() {
               {openTrades.map((t) => (
                 <View key={t.contractId} style={styles.tradeRow}>
                   <Text style={styles.tradeText}>
-                    #{t.contractId} • {t.symbol} • {t.contractType || '—'} • Entry {t.entry.toFixed(5)} • Stake ${t.stake} • PnL ${t.pnl?.toFixed(2)}
+                    #{t.contractId} • {t.symbol} • {t.contractType || '—'} • Entry: {t.entry.toFixed(5)} • Stake: ${t.stake}
+                  </Text>
+                  <Text style={[styles.tradeText, { color: t.pnl >= 0 ? colors.accent : colors.error }]}>
+                    PnL: ${t.pnl?.toFixed(2)}
                   </Text>
                 </View>
               ))}
@@ -448,7 +570,7 @@ export default function BotScreen() {
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Trade Logs</Text>
+          <Text style={styles.sectionTitle}>Trade History</Text>
           {!logs.length ? (
             <Text style={styles.helper}>No closed trades yet.</Text>
           ) : (
@@ -456,7 +578,9 @@ export default function BotScreen() {
               {logs.slice(0, 20).map((l) => (
                 <View key={l.contractId} style={styles.tradeRow}>
                   <Text style={styles.tradeText}>
-                    #{l.contractId} • {l.symbol} • {l.result.toUpperCase()} • PnL ${l.pnl.toFixed(2)} • {new Date(l.endTime).toLocaleTimeString()}
+                    #{l.contractId} • {l.symbol} • {l.result.toUpperCase()} • 
+                    <Text style={{ color: l.pnl >= 0 ? colors.accent : colors.error }}> ${l.pnl.toFixed(2)}</Text> • 
+                    {new Date(l.endTime).toLocaleTimeString()}
                   </Text>
                 </View>
               ))}
@@ -485,7 +609,7 @@ const styles = StyleSheet.create({
     padding: 16,
     width: '100%',
     maxWidth: 900,
-    boxShadow: '0px 2px 6px rgba(0,0,0,0.25)',
+    boxShadow: '0px 4px 8px rgba(0,0,0,0.3)',
   },
   sectionTitle: {
     color: colors.text,
@@ -500,7 +624,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   highlight: {
-    color: colors.primary,
+    color: colors.accent,
     fontWeight: '600',
   },
   row: {
@@ -517,32 +641,37 @@ const styles = StyleSheet.create({
     color: colors.text,
     opacity: 0.8,
     marginTop: 8,
+    fontSize: 13,
   },
   signalRow: {
-    backgroundColor: '#0b1220',
+    backgroundColor: colors.card,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#1e2a44',
-    padding: 10,
+    borderColor: colors.grey,
+    padding: 12,
     boxShadow: '0px 2px 6px rgba(0,0,0,0.25)',
   },
   signalText: {
-    color: '#c6d4ef',
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '500',
   },
   signalTextSmall: {
-    color: '#9db2db',
+    color: colors.text,
+    opacity: 0.9,
     fontSize: 12,
     marginTop: 4,
   },
   tradeRow: {
-    backgroundColor: '#111a2e',
+    backgroundColor: colors.card,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#20325a',
-    padding: 10,
+    borderColor: colors.grey,
+    padding: 12,
     boxShadow: '0px 2px 6px rgba(0,0,0,0.25)',
   },
   tradeText: {
-    color: '#d6e2ff',
+    color: colors.text,
+    fontSize: 13,
   },
 });

@@ -1,8 +1,8 @@
 
-import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../styles/commonStyles';
-import Button from './Button';
+import { View, Text, StyleSheet } from 'react-native';
 import { AssetEntry } from '../data/assets';
+import Button from './Button';
 
 interface Props {
   entry: AssetEntry;
@@ -13,57 +13,94 @@ interface Props {
   time?: number;
 }
 
-export default function AssetRow({ entry, selected, onAdd, onRemove, price, time }: Props) {
-  const timeText = time ? new Date(time * 1000).toLocaleTimeString() : '';
-  return (
-    <View style={styles.row}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.symbol}>{entry.displayName}</Text>
-        <Text style={styles.sub}>{entry.symbol}</Text>
-        <Text style={styles.price}>
-          {price !== undefined ? `$${price.toFixed(5)} ${time ? `@ ${timeText}` : ''}` : '—'}
-        </Text>
-      </View>
-      {selected ? (
-        <Button text="Remove" onPress={onRemove} style={[styles.action, { backgroundColor: '#c62828' }]} />
-      ) : (
-        <Button text="Add" onPress={onAdd} style={styles.action} />
-      )}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  row: {
-    backgroundColor: colors.background,
+  container: {
+    backgroundColor: colors.backgroundAlt,
     borderColor: colors.grey,
     borderWidth: 1,
     borderRadius: 10,
     padding: 12,
+    marginVertical: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    boxShadow: '0px 2px 6px rgba(0,0,0,0.25)',
+    justifyContent: 'space-between',
+    boxShadow: '0px 2px 4px rgba(0,0,0,0.2)',
+  },
+  selectedContainer: {
+    borderColor: colors.accent,
+    borderWidth: 2,
+    backgroundColor: colors.card,
+  },
+  leftSection: {
+    flex: 1,
   },
   symbol: {
-    color: colors.text,
-    fontWeight: '700',
     fontSize: 16,
-  },
-  sub: {
+    fontWeight: '600',
     color: colors.text,
-    opacity: 0.75,
-    fontSize: 12,
+  },
+  name: {
+    fontSize: 14,
+    color: colors.text,
+    opacity: 0.8,
     marginTop: 2,
   },
-  price: {
-    color: colors.accent,
-    fontSize: 14,
-    marginTop: 4,
+  priceSection: {
+    alignItems: 'flex-end',
+    marginRight: 12,
   },
-  action: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 16,
-    width: 120,
+  price: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.accent,
+  },
+  time: {
+    fontSize: 12,
+    color: colors.text,
+    opacity: 0.6,
+    marginTop: 2,
+  },
+  buttonSection: {
+    minWidth: 80,
   },
 });
+
+export default function AssetRow({ entry, selected, onAdd, onRemove, price, time }: Props) {
+  return (
+    <View style={[styles.container, selected && styles.selectedContainer]}>
+      <View style={styles.leftSection}>
+        <Text style={styles.symbol}>{entry.symbol}</Text>
+        <Text style={styles.name}>{entry.name}</Text>
+      </View>
+      
+      {price !== undefined && (
+        <View style={styles.priceSection}>
+          <Text style={styles.price}>{price.toFixed(5)}</Text>
+          {time && (
+            <Text style={styles.time}>
+              {new Date(time * 1000).toLocaleTimeString()}
+            </Text>
+          )}
+        </View>
+      )}
+      
+      <View style={styles.buttonSection}>
+        {selected ? (
+          <Button
+            text="Remove"
+            onPress={onRemove}
+            style={{ backgroundColor: colors.error, paddingHorizontal: 12 }}
+            textStyle={{ fontSize: 14 }}
+          />
+        ) : (
+          <Button
+            text="Add"
+            onPress={onAdd}
+            style={{ backgroundColor: colors.accent, paddingHorizontal: 16 }}
+            textStyle={{ fontSize: 14 }}
+          />
+        )}
+      </View>
+    </View>
+  );
+}

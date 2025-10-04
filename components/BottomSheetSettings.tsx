@@ -11,24 +11,60 @@ interface Props {
   onChange: (next: Partial<BotConfig>) => void;
 }
 
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: colors.backgroundAlt,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  section: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: colors.card,
+    borderColor: colors.grey,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: colors.text,
+    marginBottom: 12,
+  },
+  label: {
+    fontSize: 14,
+    color: colors.text,
+    marginBottom: 4,
+    opacity: 0.9,
+  },
+  buttonContainer: {
+    marginTop: 20,
+  },
+});
+
 export default function BottomSheetSettings({ config, onChange }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['25%', '50%', '75%'], []);
 
   useEffect(() => {
-    // Expose global function to open settings
+    // Expose open method globally
     (globalThis as any).openSettingsSheet = () => {
-      try {
-        bottomSheetRef.current?.expand();
-      } catch (error) {
-        console.log('Error opening settings sheet:', error);
-      }
-    };
-
-    return () => {
-      (globalThis as any).openSettingsSheet = undefined;
+      bottomSheetRef.current?.expand();
     };
   }, []);
+
+  const snapPoints = useMemo(() => ['25%', '90%'], []);
 
   const renderBackdrop = useCallback(
     (props: any) => (
@@ -36,29 +72,22 @@ export default function BottomSheetSettings({ config, onChange }: Props) {
         {...props}
         disappearsOnIndex={-1}
         appearsOnIndex={0}
+        opacity={0.5}
       />
     ),
     []
   );
 
   const handleClose = () => {
-    try {
-      bottomSheetRef.current?.close();
-    } catch (error) {
-      console.log('Error closing settings sheet:', error);
-    }
+    bottomSheetRef.current?.close();
   };
 
   const handleInputChange = (field: keyof BotConfig, value: string) => {
-    try {
-      if (field === 'tradeStake') {
-        const numValue = parseFloat(value) || 1;
-        onChange({ [field]: numValue });
-      } else {
-        onChange({ [field]: value });
-      }
-    } catch (error) {
-      console.log('Error handling input change:', error);
+    if (field === 'tradeStake') {
+      const numValue = parseFloat(value) || 0;
+      onChange({ [field]: numValue });
+    } else {
+      onChange({ [field]: value });
     }
   };
 
@@ -69,36 +98,38 @@ export default function BottomSheetSettings({ config, onChange }: Props) {
       snapPoints={snapPoints}
       backdropComponent={renderBackdrop}
       enablePanDownToClose
-      backgroundStyle={styles.bottomSheet}
-      handleIndicatorStyle={styles.indicator}
+      backgroundStyle={{ backgroundColor: colors.backgroundAlt }}
+      handleIndicatorStyle={{ backgroundColor: colors.grey }}
     >
-      <View style={styles.content}>
-        <Text style={styles.title}>Bot Settings</Text>
-        
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Deriv App ID</Text>
-          <TextInput
-            style={styles.input}
-            value={config.derivAppId || ''}
-            onChangeText={(text) => handleInputChange('derivAppId', text)}
-            placeholder="Enter Deriv App ID"
-            placeholderTextColor={colors.grey}
-          />
-        </View>
+      <View style={styles.container}>
+        <Text style={styles.title}>Bot Configuration</Text>
 
-        <View style={styles.inputGroup}>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Deriv API Settings</Text>
+          
           <Text style={styles.label}>API Token</Text>
           <TextInput
             style={styles.input}
             value={config.apiToken || ''}
             onChangeText={(text) => handleInputChange('apiToken', text)}
-            placeholder="Enter API Token"
+            placeholder="Enter your Deriv API token"
             placeholderTextColor={colors.grey}
             secureTextEntry
           />
+
+          <Text style={styles.label}>App ID</Text>
+          <TextInput
+            style={styles.input}
+            value={config.derivAppId || ''}
+            onChangeText={(text) => handleInputChange('derivAppId', text)}
+            placeholder="Enter your Deriv App ID"
+            placeholderTextColor={colors.grey}
+          />
         </View>
 
-        <View style={styles.inputGroup}>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Trading Settings</Text>
+          
           <Text style={styles.label}>Trade Stake (USD)</Text>
           <TextInput
             style={styles.input}
@@ -110,64 +141,14 @@ export default function BottomSheetSettings({ config, onChange }: Props) {
           />
         </View>
 
-        <View style={styles.buttonRow}>
+        <View style={styles.buttonContainer}>
           <Button
-            text="Close"
+            text="Close Settings"
             onPress={handleClose}
-            style={styles.closeButton}
+            style={{ backgroundColor: colors.accent }}
           />
         </View>
       </View>
     </BottomSheet>
   );
 }
-
-const styles = StyleSheet.create({
-  bottomSheet: {
-    backgroundColor: colors.backgroundAlt,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  indicator: {
-    backgroundColor: colors.grey,
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 16,
-    color: colors.text,
-    marginBottom: 8,
-    fontWeight: '500',
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderColor: colors.grey,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: colors.text,
-    minHeight: 44,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 20,
-  },
-  closeButton: {
-    backgroundColor: colors.grey,
-    minWidth: 120,
-  },
-});

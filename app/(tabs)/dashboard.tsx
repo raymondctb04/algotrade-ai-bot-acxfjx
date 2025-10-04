@@ -1,145 +1,49 @@
 
+import { useRouter } from 'expo-router';
+import { colors, commonStyles } from '../../styles/commonStyles';
+import Button from '../../components/Button';
+import Donut from '../../components/Donut';
+import useBotConfig from '../../hooks/useBotConfig';
+import { tradeStore } from '../../store/tradeStore';
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { colors, commonStyles } from '../../styles/commonStyles';
-import Donut from '../../components/Donut';
-import Button from '../../components/Button';
-import useBotConfig from '../../hooks/useBotConfig';
-import { useRouter } from 'expo-router';
-import { tradeStore } from '../../store/tradeStore';
-
-export default function DashboardScreen() {
-  const router = useRouter();
-  const { config } = useBotConfig();
-  const [logs, setLogs] = useState(tradeStore.get().logs);
-  const [open, setOpen] = useState(tradeStore.get().open);
-
-  useEffect(() => {
-    const unsub = tradeStore.subscribe(() => {
-      const s = tradeStore.get();
-      setLogs(s.logs);
-      setOpen(s.open);
-    });
-    return unsub;
-  }, []);
-
-  const readiness = useMemo(() => {
-    const fields = [
-      config.assetClass,
-      config.riskTolerance,
-      config.timeframe,
-      config.assets.length > 0 ? 'ok' : '',
-      config.confluenceThreshold ? 'ok' : '',
-      config.riskPerTrade ? 'ok' : '',
-    ];
-    const filled = fields.filter(Boolean).length;
-    const pct = Math.round((filled / fields.length) * 100);
-    const chunk = Math.max(10, Math.min(100, pct));
-    return {
-      trend: Math.min(100, Math.round(chunk * 0.95)),
-      mean: Math.min(100, Math.round(chunk * 0.9)),
-      arbitrage: Math.min(100, Math.round(chunk * 0.6)),
-      sentiment: Math.min(100, Math.round(chunk * 0.65)),
-      scalping: Math.min(100, Math.round(chunk * 0.85)),
-      overall: pct,
-    };
-  }, [config]);
-
-  const bestPairs = useMemo(() => {
-    const map: Record<string, number> = {};
-    logs.forEach((l) => {
-      map[l.symbol] = (map[l.symbol] || 0) + l.pnl;
-    });
-    const arr = Object.entries(map).map(([symbol, pnl]) => ({ symbol, pnl }));
-    arr.sort((a, b) => b.pnl - a.pnl);
-    return arr.slice(0, 5);
-  }, [logs]);
-
-  const totalPnL = useMemo(() => logs.reduce((acc, l) => acc + l.pnl, 0), [logs]);
-
-  return (
-    <View style={commonStyles.container}>
-      <ScrollView
-        style={{ width: '100%' }}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={commonStyles.title}>Hybrid Bot Dashboard</Text>
-        <Text style={commonStyles.text}>
-          Configure assets and hit Start on the Bot tab to generate signals and trade.
-        </Text>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Readiness</Text>
-          <View style={styles.donutRow}>
-            <Donut size={90} strokeWidth={12} value={readiness.trend} label="Trend" />
-            <Donut size={90} strokeWidth={12} value={readiness.mean} label="Mean" />
-            <Donut size={90} strokeWidth={12} value={readiness.arbitrage} label="Arb" />
-            <Donut size={90} strokeWidth={12} value={readiness.sentiment} label="Sent" />
-            <Donut size={90} strokeWidth={12} value={readiness.scalping} label="Scalp" />
-          </View>
-          <Text style={[styles.center, { marginTop: 8 }]}>Overall: {readiness.overall}%</Text>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.row}>
-            <Button text="Open Settings" onPress={() => (globalThis as any).openSettingsSheet?.()} style={styles.chip} />
-            <Button text="Manage Assets" onPress={() => router.push('/(tabs)/assets')} style={styles.chip} />
-            <Button text="Go to Bot" onPress={() => router.push('/(tabs)/bot')} style={styles.chip} />
-          </View>
-          <Text style={styles.helper}>
-            Selected assets: {config.assets.length ? config.assets.join(', ') : 'None'}
-          </Text>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Open Trades ({open.length})</Text>
-          {!open.length ? (
-            <Text style={styles.helper}>No open trades.</Text>
-          ) : (
-            <View style={{ gap: 8 }}>
-              {open.slice(0, 10).map((t) => (
-                <View key={t.contractId} style={styles.tradeRow}>
-                  <Text style={styles.tradeText}>
-                    #{t.contractId} • {t.symbol} • PnL ${t.pnl.toFixed(2)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Best Performing Pairs</Text>
-          {!bestPairs.length ? (
-            <Text style={styles.helper}>No trades yet.</Text>
-          ) : (
-            <View style={{ gap: 8 }}>
-              {bestPairs.map((b) => (
-                <View key={b.symbol} style={styles.tradeRow}>
-                  <Text style={styles.tradeText}>
-                    {b.symbol} • Total PnL ${b.pnl.toFixed(2)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
-          <Text style={[styles.center, { marginTop: 8 }]}>Cumulative PnL: ${totalPnL.toFixed(2)}</Text>
-        </View>
-
-        <View style={{ height: 24 }} />
-      </ScrollView>
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   content: {
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingBottom: 40,
+    gap: 16,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
+    width: '100%',
+    maxWidth: 900,
+    justifyContent: 'center',
+  },
+  statCard: {
+    backgroundColor: colors.backgroundAlt,
+    borderColor: colors.grey,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    minWidth: 140,
+    alignItems: 'center',
+    boxShadow: '0px 4px 8px rgba(0,0,0,0.3)',
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: colors.text,
+    opacity: 0.8,
+    textAlign: 'center',
   },
   sectionCard: {
     backgroundColor: colors.backgroundAlt,
@@ -149,47 +53,192 @@ const styles = StyleSheet.create({
     padding: 16,
     width: '100%',
     maxWidth: 900,
-    boxShadow: '0px 2px 6px rgba(0,0,0,0.25)',
+    boxShadow: '0px 4px 8px rgba(0,0,0,0.3)',
   },
   sectionTitle: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  row: {
+  performanceRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    gap: 20,
+    marginBottom: 16,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
     flexWrap: 'wrap',
-    marginTop: 4,
+    marginTop: 16,
   },
-  chip: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 14,
-  },
-  helper: {
-    color: colors.text,
-    opacity: 0.8,
-    marginTop: 8,
-  },
-  center: {
-    color: colors.text,
-    textAlign: 'center',
-  },
-  donutRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  tradeRow: {
-    backgroundColor: '#111a2e',
+  recentTrade: {
+    backgroundColor: colors.card,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#20325a',
-    padding: 10,
-    boxShadow: '0px 2px 6px rgba(0,0,0,0.25)',
+    borderColor: colors.grey,
+    padding: 12,
+    marginBottom: 8,
+    boxShadow: '0px 2px 4px rgba(0,0,0,0.2)',
   },
   tradeText: {
-    color: '#d6e2ff',
+    color: colors.text,
+    fontSize: 14,
+  },
+  profitText: {
+    fontWeight: '600',
   },
 });
+
+export default function DashboardScreen() {
+  const router = useRouter();
+  const { config } = useBotConfig();
+  const [trades, setTrades] = useState(tradeStore.get().logs);
+  const [openTrades, setOpenTrades] = useState(tradeStore.get().open);
+
+  useEffect(() => {
+    const unsub = tradeStore.subscribe(() => {
+      const state = tradeStore.get();
+      setTrades(state.logs);
+      setOpenTrades(state.open);
+    });
+    return unsub;
+  }, []);
+
+  const stats = useMemo(() => {
+    const totalTrades = trades.length;
+    const wins = trades.filter(t => t.result === 'win').length;
+    const losses = trades.filter(t => t.result === 'loss').length;
+    const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+    
+    const totalPnL = trades.reduce((sum, t) => sum + t.pnl, 0);
+    const avgPnL = totalTrades > 0 ? totalPnL / totalTrades : 0;
+    
+    const currentPnL = openTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    
+    return {
+      totalTrades,
+      wins,
+      losses,
+      winRate,
+      totalPnL,
+      avgPnL,
+      currentPnL,
+      openPositions: openTrades.length,
+    };
+  }, [trades, openTrades]);
+
+  return (
+    <View style={commonStyles.container}>
+      <ScrollView
+        style={{ width: '100%' }}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={commonStyles.title}>Trading Dashboard</Text>
+        <Text style={commonStyles.text}>
+          Monitor your enhanced trading bot performance and statistics
+        </Text>
+
+        <View style={styles.statsGrid}>
+          <View style={styles.statCard}>
+            <Text style={[styles.statValue, { color: colors.accent }]}>
+              {stats.totalTrades}
+            </Text>
+            <Text style={styles.statLabel}>Total Trades</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <Text style={[styles.statValue, { color: stats.winRate >= 50 ? colors.accent : colors.error }]}>
+              {stats.winRate.toFixed(1)}%
+            </Text>
+            <Text style={styles.statLabel}>Win Rate</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <Text style={[styles.statValue, { color: stats.totalPnL >= 0 ? colors.accent : colors.error }]}>
+              ${stats.totalPnL.toFixed(2)}
+            </Text>
+            <Text style={styles.statLabel}>Total P&L</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <Text style={[styles.statValue, { color: colors.primary }]}>
+              {stats.openPositions}
+            </Text>
+            <Text style={styles.statLabel}>Open Positions</Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Performance Overview</Text>
+          <View style={styles.performanceRow}>
+            <Donut
+              size={120}
+              strokeWidth={10}
+              value={stats.winRate}
+              label="Win Rate"
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.statValue, { fontSize: 18, marginBottom: 8 }]}>
+                Current P&L: <Text style={{ color: stats.currentPnL >= 0 ? colors.accent : colors.error }}>
+                  ${stats.currentPnL.toFixed(2)}
+                </Text>
+              </Text>
+              <Text style={styles.statLabel}>
+                Average P&L per trade: ${stats.avgPnL.toFixed(2)}
+              </Text>
+              <Text style={styles.statLabel}>
+                Wins: {stats.wins} | Losses: {stats.losses}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <View style={styles.buttonRow}>
+            <Button
+              text="Start Trading Bot"
+              onPress={() => router.push('/bot')}
+              style={{ backgroundColor: colors.accent, flex: 1, minWidth: 140 }}
+            />
+            <Button
+              text="Manage Assets"
+              onPress={() => router.push('/assets')}
+              style={{ backgroundColor: colors.primary, flex: 1, minWidth: 140 }}
+            />
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Recent Trades</Text>
+          {trades.length === 0 ? (
+            <Text style={[styles.statLabel, { textAlign: 'center', marginTop: 20 }]}>
+              No trades yet. Start the bot to begin trading.
+            </Text>
+          ) : (
+            <View>
+              {trades.slice(0, 5).map((trade) => (
+                <View key={trade.contractId} style={styles.recentTrade}>
+                  <Text style={styles.tradeText}>
+                    {trade.symbol} • {trade.result.toUpperCase()} • 
+                    <Text style={[styles.profitText, { color: trade.pnl >= 0 ? colors.accent : colors.error }]}>
+                      {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
+                    </Text>
+                  </Text>
+                  <Text style={[styles.tradeText, { opacity: 0.7, fontSize: 12 }]}>
+                    {new Date(trade.endTime).toLocaleString()}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={{ height: 24 }} />
+      </ScrollView>
+    </View>
+  );
+}
