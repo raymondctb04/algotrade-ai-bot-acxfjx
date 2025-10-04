@@ -27,6 +27,7 @@ export default function useBotConfig() {
 
   return {
     config,
+    updateConfig: setConfig,
     setConfig,
     setAssetClass,
     setRiskTolerance,

@@ -1,72 +1,71 @@
 
 export type AssetEntry = {
   symbol: string;
-  displayName: string;
+  name: string;
   category:
     | 'forex'
     | 'indices'
     | 'crypto'
-    | 'boom'
-    | 'crash'
-    | 'volatility'
-    | 'volatility_1s';
+    | 'commodities'
+    | 'synthetics';
 };
 
 export const ASSETS: AssetEntry[] = [
   // Forex
-  { symbol: 'frxEURUSD', displayName: 'EUR/USD', category: 'forex' },
-  { symbol: 'frxGBPUSD', displayName: 'GBP/USD', category: 'forex' },
-  { symbol: 'frxUSDJPY', displayName: 'USD/JPY', category: 'forex' },
-  { symbol: 'frxUSDCHF', displayName: 'USD/CHF', category: 'forex' },
-  { symbol: 'frxUSDCAD', displayName: 'USD/CAD', category: 'forex' },
-  { symbol: 'frxAUDUSD', displayName: 'AUD/USD', category: 'forex' },
-  { symbol: 'frxNZDUSD', displayName: 'NZD/USD', category: 'forex' },
+  { symbol: 'frxEURUSD', name: 'EUR/USD', category: 'forex' },
+  { symbol: 'frxGBPUSD', name: 'GBP/USD', category: 'forex' },
+  { symbol: 'frxUSDJPY', name: 'USD/JPY', category: 'forex' },
+  { symbol: 'frxUSDCHF', name: 'USD/CHF', category: 'forex' },
+  { symbol: 'frxUSDCAD', name: 'USD/CAD', category: 'forex' },
+  { symbol: 'frxAUDUSD', name: 'AUD/USD', category: 'forex' },
+  { symbol: 'frxNZDUSD', name: 'NZD/USD', category: 'forex' },
 
   // Indices
-  { symbol: 'OTC_FTSE', displayName: 'UK 100', category: 'indices' },
-  { symbol: 'OTC_SPC', displayName: 'US 500', category: 'indices' },
-  { symbol: 'OTC_NDX', displayName: 'US Tech 100', category: 'indices' },
-  { symbol: 'OTC_DJI', displayName: 'Wall Street 30', category: 'indices' },
+  { symbol: 'OTC_FTSE', name: 'UK 100', category: 'indices' },
+  { symbol: 'OTC_SPC', name: 'US 500', category: 'indices' },
+  { symbol: 'OTC_NDX', name: 'US Tech 100', category: 'indices' },
+  { symbol: 'OTC_DJI', name: 'Wall Street 30', category: 'indices' },
 
   // Crypto
-  { symbol: 'cryBTCUSD', displayName: 'BTC/USD', category: 'crypto' },
-  { symbol: 'cryETHUSD', displayName: 'ETH/USD', category: 'crypto' },
+  { symbol: 'cryBTCUSD', name: 'BTC/USD', category: 'crypto' },
+  { symbol: 'cryETHUSD', name: 'ETH/USD', category: 'crypto' },
 
-  // Boom
-  { symbol: 'BOOM300N', displayName: 'Boom 300 Index', category: 'boom' },
-  { symbol: 'BOOM500', displayName: 'Boom 500 Index', category: 'boom' },
-  { symbol: 'BOOM600', displayName: 'Boom 600 Index', category: 'boom' },
-  { symbol: 'BOOM900', displayName: 'Boom 900 Index', category: 'boom' },
-  { symbol: 'BOOM1000', displayName: 'Boom 1000 Index', category: 'boom' },
+  // Commodities
+  { symbol: 'frxXAUUSD', name: 'Gold/USD', category: 'commodities' },
+  { symbol: 'frxXAGUSD', name: 'Silver/USD', category: 'commodities' },
+  { symbol: 'OTC_OIL', name: 'Oil', category: 'commodities' },
 
-  // Crash
-  { symbol: 'CRASH300N', displayName: 'Crash 300 Index', category: 'crash' },
-  { symbol: 'CRASH500', displayName: 'Crash 500 Index', category: 'crash' },
-  { symbol: 'CRASH600', displayName: 'Crash 600 Index', category: 'crash' },
-  { symbol: 'CRASH900', displayName: 'Crash 900 Index', category: 'crash' },
-  { symbol: 'CRASH1000', displayName: 'Crash 1000 Index', category: 'crash' },
+  // Synthetic Indices (Boom, Crash, Volatility)
+  { symbol: 'BOOM300N', name: 'Boom 300 Index', category: 'synthetics' },
+  { symbol: 'BOOM500', name: 'Boom 500 Index', category: 'synthetics' },
+  { symbol: 'BOOM600', name: 'Boom 600 Index', category: 'synthetics' },
+  { symbol: 'BOOM900', name: 'Boom 900 Index', category: 'synthetics' },
+  { symbol: 'BOOM1000', name: 'Boom 1000 Index', category: 'synthetics' },
 
-  // Volatility
-  { symbol: 'R_10', displayName: 'Volatility 10 Index', category: 'volatility' },
-  { symbol: 'R_25', displayName: 'Volatility 25 Index', category: 'volatility' },
-  { symbol: 'R_50', displayName: 'Volatility 50 Index', category: 'volatility' },
-  { symbol: 'R_75', displayName: 'Volatility 75 Index', category: 'volatility' },
-  { symbol: 'R_100', displayName: 'Volatility 100 Index', category: 'volatility' },
+  { symbol: 'CRASH300N', name: 'Crash 300 Index', category: 'synthetics' },
+  { symbol: 'CRASH500', name: 'Crash 500 Index', category: 'synthetics' },
+  { symbol: 'CRASH600', name: 'Crash 600 Index', category: 'synthetics' },
+  { symbol: 'CRASH900', name: 'Crash 900 Index', category: 'synthetics' },
+  { symbol: 'CRASH1000', name: 'Crash 1000 Index', category: 'synthetics' },
 
-  // Volatility (1s)
-  { symbol: '1HZ10V', displayName: 'Volatility 10 (1s) Index', category: 'volatility_1s' },
-  { symbol: '1HZ15V', displayName: 'Volatility 15 (1s) Index', category: 'volatility_1s' },
-  { symbol: '1HZ25V', displayName: 'Volatility 25 (1s) Index', category: 'volatility_1s' },
-  { symbol: '1HZ30V', displayName: 'Volatility 30 (1s) Index', category: 'volatility_1s' },
-  { symbol: '1HZ50V', displayName: 'Volatility 50 (1s) Index', category: 'volatility_1s' },
-  { symbol: '1HZ75V', displayName: 'Volatility 75 (1s) Index', category: 'volatility_1s' },
-  { symbol: '1HZ90V', displayName: 'Volatility 90 (1s) Index', category: 'volatility_1s' },
-  { symbol: '1HZ100V', displayName: 'Volatility 100 (1s) Index', category: 'volatility_1s' },
+  { symbol: 'R_10', name: 'Volatility 10 Index', category: 'synthetics' },
+  { symbol: 'R_25', name: 'Volatility 25 Index', category: 'synthetics' },
+  { symbol: 'R_50', name: 'Volatility 50 Index', category: 'synthetics' },
+  { symbol: 'R_75', name: 'Volatility 75 Index', category: 'synthetics' },
+  { symbol: 'R_100', name: 'Volatility 100 Index', category: 'synthetics' },
 
-  // Step indices (mapped to volatility category for grouping)
-  { symbol: 'stpRNG', displayName: 'Step Index 100', category: 'volatility' },
-  { symbol: 'stpRNG2', displayName: 'Step Index 200', category: 'volatility' },
-  { symbol: 'stpRNG3', displayName: 'Step Index 300', category: 'volatility' },
-  { symbol: 'stpRNG4', displayName: 'Step Index 400', category: 'volatility' },
-  { symbol: 'stpRNG5', displayName: 'Step Index 500', category: 'volatility' },
+  { symbol: '1HZ10V', name: 'Volatility 10 (1s) Index', category: 'synthetics' },
+  { symbol: '1HZ15V', name: 'Volatility 15 (1s) Index', category: 'synthetics' },
+  { symbol: '1HZ25V', name: 'Volatility 25 (1s) Index', category: 'synthetics' },
+  { symbol: '1HZ30V', name: 'Volatility 30 (1s) Index', category: 'synthetics' },
+  { symbol: '1HZ50V', name: 'Volatility 50 (1s) Index', category: 'synthetics' },
+  { symbol: '1HZ75V', name: 'Volatility 75 (1s) Index', category: 'synthetics' },
+  { symbol: '1HZ90V', name: 'Volatility 90 (1s) Index', category: 'synthetics' },
+  { symbol: '1HZ100V', name: 'Volatility 100 (1s) Index', category: 'synthetics' },
+
+  { symbol: 'stpRNG', name: 'Step Index 100', category: 'synthetics' },
+  { symbol: 'stpRNG2', name: 'Step Index 200', category: 'synthetics' },
+  { symbol: 'stpRNG3', name: 'Step Index 300', category: 'synthetics' },
+  { symbol: 'stpRNG4', name: 'Step Index 400', category: 'synthetics' },
+  { symbol: 'stpRNG5', name: 'Step Index 500', category: 'synthetics' },
 ];

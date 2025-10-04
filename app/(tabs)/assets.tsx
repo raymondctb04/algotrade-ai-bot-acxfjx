@@ -8,7 +8,7 @@ import { ASSETS, AssetEntry } from '../../data/assets';
 import useBotConfig from '../../hooks/useBotConfig';
 import { useEffect, useMemo, useState } from 'react';
 
-type Category = 'forex' | 'crypto' | 'indices' | 'commodities';
+type Category = 'forex' | 'crypto' | 'indices' | 'commodities' | 'synthetics';
 
 const styles = StyleSheet.create({
   content: {
@@ -106,6 +106,7 @@ export default function AssetsScreen() {
     { key: 'crypto', label: 'Crypto', count: ASSETS.filter(a => a.category === 'crypto').length },
     { key: 'indices', label: 'Indices', count: ASSETS.filter(a => a.category === 'indices').length },
     { key: 'commodities', label: 'Commodities', count: ASSETS.filter(a => a.category === 'commodities').length },
+    { key: 'synthetics', label: 'Synthetics', count: ASSETS.filter(a => a.category === 'synthetics').length },
   ];
 
   return (
