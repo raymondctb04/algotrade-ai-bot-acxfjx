@@ -62,14 +62,26 @@ class DerivClient {
         this.connectPromise = null;
       };
 
+      const timeoutId = setTimeout(() => {
+        console.log('WebSocket connection timeout');
+        if (this.connectPromise) {
+          reject(new Error('WebSocket connection timeout'));
+          cleanup();
+        }
+      }, 10000); // 10 second timeout
+
       this.ws!.onopen = () => {
         console.log('Deriv WS connected');
+        clearTimeout(timeoutId);
         this.connected = true;
         derivStore.set({ status: 'connected', lastError: undefined });
 
         // Re-authorize if we have token
         if (this.token) {
-          this.authorize(this.token).catch((e) => console.log('Authorize on reconnect failed', e));
+          this.authorize(this.token).catch((e) => {
+            console.log('Authorize on reconnect failed', e);
+            derivStore.set({ lastError: `Auth failed: ${e.message}` });
+          });
         }
         // Re-subscribe to tick symbols after connection established
         const symbols = Array.from(this.subscribedSymbols);
@@ -111,6 +123,7 @@ class DerivClient {
 
       this.ws!.onclose = (e) => {
         console.log('Deriv WS closed', e.code, e.reason);
+        clearTimeout(timeoutId);
         this.connected = false;
         this.authorized = false;
         derivStore.set({ status: 'disconnected' });
@@ -118,20 +131,27 @@ class DerivClient {
         this.pending.clear();
         // Clear current subscription ids; we'll resubscribe on reconnect
         this.tickSubs.clear();
-        // try reconnect with small delay
-        setTimeout(() => {
-          if (this.appId) this.connect(this.appId).catch((err) => console.log('Reconnect failed', err));
-        }, 1500);
-
+        
         // Reject initial connect if it hasn't resolved yet
         if (this.connectPromise) {
           reject(new Error('WebSocket closed before ready'));
           cleanup();
         }
+
+        // try reconnect with small delay
+        setTimeout(() => {
+          if (this.appId) {
+            this.connect(this.appId).catch((err) => {
+              console.log('Reconnect failed', err);
+              derivStore.set({ lastError: `Reconnect failed: ${err.message}` });
+            });
+          }
+        }, 1500);
       };
 
       this.ws!.onerror = (e: any) => {
         console.log('Deriv WS error', e?.message || e);
+        clearTimeout(timeoutId);
         derivStore.set({ status: 'error', lastError: e?.message || 'WebSocket error' });
         if (this.connectPromise) {
           reject(new Error(e?.message || 'WebSocket error'));
@@ -162,6 +182,15 @@ class DerivClient {
       const body = { ...payload, req_id };
       const pending: PendingRequest = { req_id, resolve, reject };
       this.pending.set(req_id, pending);
+      
+      // Add timeout for requests
+      setTimeout(() => {
+        if (this.pending.has(req_id)) {
+          this.pending.delete(req_id);
+          reject(new Error('Request timeout'));
+        }
+      }, 30000); // 30 second timeout
+
       try {
         this.ws.send(JSON.stringify(body));
       } catch (e) {
@@ -263,7 +292,11 @@ class DerivClient {
           result: pnl >= 0 ? 'win' : 'loss',
         });
         if (this.ws) {
-          this.ws.send(JSON.stringify({ forget: poc.subscription?.id }));
+          try {
+            this.ws.send(JSON.stringify({ forget: poc.subscription?.id }));
+          } catch (e) {
+            console.log('Error forgetting subscription:', e);
+          }
         }
         this.pocSubs.delete(contractId);
       }
@@ -271,20 +304,32 @@ class DerivClient {
   }
 
   async authorize(token: string) {
-    this.token = token;
-    const res = await this.send({ authorize: token });
-    return res;
+    try {
+      this.token = token;
+      const res = await this.send({ authorize: token });
+      return res;
+    } catch (error) {
+      console.log('Authorization failed:', error);
+      derivStore.set({ lastError: `Authorization failed: ${(error as any).message}` });
+      throw error;
+    }
   }
 
   async subscribeTicks(symbol: string) {
-    if (this.tickSubs.has(symbol)) return;
-    this.subscribedSymbols.add(symbol);
-    const res: any = await this.send({ ticks: symbol, subscribe: 1 });
-    const subId = (res as any)?.tick?.id || (res as any)?.subscription?.id || (res as any)?.tick?.subscription?.id;
-    if (subId) {
-      this.tickSubs.set(symbol, subId);
+    try {
+      if (this.tickSubs.has(symbol)) return;
+      this.subscribedSymbols.add(symbol);
+      const res: any = await this.send({ ticks: symbol, subscribe: 1 });
+      const subId = (res as any)?.tick?.id || (res as any)?.subscription?.id || (res as any)?.tick?.subscription?.id;
+      if (subId) {
+        this.tickSubs.set(symbol, subId);
+      }
+      console.log('Subscribed ticks', symbol);
+    } catch (error) {
+      console.log('Failed to subscribe to ticks for', symbol, error);
+      this.subscribedSymbols.delete(symbol);
+      throw error;
     }
-    console.log('Subscribed ticks', symbol);
   }
 
   async unsubscribeTicks(symbol: string) {
@@ -293,7 +338,9 @@ class DerivClient {
     if (!id) return;
     this.tickSubs.delete(symbol);
     try {
-      this.ws?.send(JSON.stringify({ forget: id }));
+      if (this.ws && this.ws.readyState === 1) {
+        this.ws.send(JSON.stringify({ forget: id }));
+      }
       console.log('Unsubscribed ticks', symbol);
     } catch (e) {
       console.log('Unsubscribe error', e);
@@ -301,35 +348,48 @@ class DerivClient {
   }
 
   async subscribeMultiple(symbols: string[]) {
-    for (const s of symbols) {
-      try {
-        await this.subscribeTicks(s);
-      } catch (e) {
-        console.log('Failed to subscribe', s, e);
+    const results = await Promise.allSettled(
+      symbols.map(s => this.subscribeTicks(s))
+    );
+    
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.log('Failed to subscribe', symbols[index], result.reason);
       }
-    }
+    });
   }
 
   async unsubscribeAllTicks() {
     const all = Array.from(this.tickSubs.keys());
-    for (const s of all) {
-      await this.unsubscribeTicks(s);
-    }
+    const results = await Promise.allSettled(
+      all.map(s => this.unsubscribeTicks(s))
+    );
+    
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.log('Failed to unsubscribe', all[index], result.reason);
+      }
+    });
   }
 
   async subscribeCandles(symbol: string, granularitySec: number, count = 500) {
-    const key = `${symbol}::${granularitySec}`;
-    if (this.candleSubs.has(key)) return;
-    const res: any = await this.send({
-      ticks_history: symbol,
-      style: 'candles',
-      granularity: granularitySec,
-      count,
-      subscribe: 1,
-    });
-    const subId = (res as any)?.subscription?.id || (res as any)?.candles?.subscription?.id || (res as any)?.candles?.id;
-    if (subId) this.candleSubs.set(key, subId);
-    console.log('Subscribed candles', key);
+    try {
+      const key = `${symbol}::${granularitySec}`;
+      if (this.candleSubs.has(key)) return;
+      const res: any = await this.send({
+        ticks_history: symbol,
+        style: 'candles',
+        granularity: granularitySec,
+        count,
+        subscribe: 1,
+      });
+      const subId = (res as any)?.subscription?.id || (res as any)?.candles?.subscription?.id || (res as any)?.candles?.id;
+      if (subId) this.candleSubs.set(key, subId);
+      console.log('Subscribed candles', key);
+    } catch (error) {
+      console.log('Failed to subscribe to candles for', symbol, granularitySec, error);
+      throw error;
+    }
   }
 
   async unsubscribeCandles(symbol: string, granularitySec: number) {
@@ -338,7 +398,9 @@ class DerivClient {
     if (!id) return;
     this.candleSubs.delete(key);
     try {
-      this.ws?.send(JSON.stringify({ forget: id }));
+      if (this.ws && this.ws.readyState === 1) {
+        this.ws.send(JSON.stringify({ forget: id }));
+      }
       console.log('Unsubscribed candles', key);
     } catch (e) {
       console.log('Unsub candles error', e);
@@ -346,79 +408,113 @@ class DerivClient {
   }
 
   async subscribeCandlesMultiple(symbols: string[], granularities: number[]) {
+    const promises = [];
     for (const s of symbols) {
       for (const g of granularities) {
-        try {
-          await this.subscribeCandles(s, g);
-        } catch (e) {
-          console.log('Failed to sub candle', s, g, e);
-        }
+        promises.push(this.subscribeCandles(s, g));
       }
     }
+    
+    const results = await Promise.allSettled(promises);
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.log('Failed to sub candle', index, result.reason);
+      }
+    });
   }
 
   async unsubscribeAllCandles() {
     const entries = Array.from(this.candleSubs.entries());
     this.candleSubs.clear();
-    for (const [, id] of entries) {
-      try {
-        this.ws?.send(JSON.stringify({ forget: id }));
-      } catch (e) {
-        console.log('Unsub all candles error', e);
+    
+    const results = await Promise.allSettled(
+      entries.map(([, id]) => {
+        if (this.ws && this.ws.readyState === 1) {
+          return new Promise<void>((resolve) => {
+            try {
+              this.ws!.send(JSON.stringify({ forget: id }));
+              resolve();
+            } catch (e) {
+              console.log('Unsub all candles error', e);
+              resolve();
+            }
+          });
+        }
+        return Promise.resolve();
+      })
+    );
+    
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.log('Failed to unsubscribe candle', index, result.reason);
       }
-    }
+    });
   }
 
   async unsubscribeAll() {
     try {
-      await this.unsubscribeAllTicks();
+      await Promise.allSettled([
+        this.unsubscribeAllTicks(),
+        this.unsubscribeAllCandles()
+      ]);
+      this.subscribedSymbols.clear();
+      console.log('Unsubscribed from all feeds');
     } catch (e) {
-      console.log('Unsub all ticks error', e);
+      console.log('Error during unsubscribe all', e);
     }
-    try {
-      await this.unsubscribeAllCandles();
-    } catch (e) {
-      console.log('Unsub all candles error', e);
-    }
-    this.subscribedSymbols.clear();
   }
 
   async proposeRise(symbol: string, stakeUSD: number) {
-    const payload = {
-      proposal: 1,
-      amount: stakeUSD,
-      basis: 'stake',
-      contract_type: 'CALL',
-      currency: 'USD',
-      duration: 1,
-      duration_unit: 'm',
-      symbol,
-    };
-    const res: any = await this.send(payload);
-    if (res.error) throw res.error;
-    return res.proposal;
+    try {
+      const payload = {
+        proposal: 1,
+        amount: stakeUSD,
+        basis: 'stake',
+        contract_type: 'CALL',
+        currency: 'USD',
+        duration: 1,
+        duration_unit: 'm',
+        symbol,
+      };
+      const res: any = await this.send(payload);
+      if (res.error) throw res.error;
+      return res.proposal;
+    } catch (error) {
+      console.log('Propose rise failed:', error);
+      throw error;
+    }
   }
 
   async proposeFall(symbol: string, stakeUSD: number) {
-    const payload = {
-      proposal: 1,
-      amount: stakeUSD,
-      basis: 'stake',
-      contract_type: 'PUT',
-      currency: 'USD',
-      duration: 1,
-      duration_unit: 'm',
-      symbol,
-    };
-    const res: any = await this.send(payload);
-    if (res.error) throw res.error;
-    return res.proposal;
+    try {
+      const payload = {
+        proposal: 1,
+        amount: stakeUSD,
+        basis: 'stake',
+        contract_type: 'PUT',
+        currency: 'USD',
+        duration: 1,
+        duration_unit: 'm',
+        symbol,
+      };
+      const res: any = await this.send(payload);
+      if (res.error) throw res.error;
+      return res.proposal;
+    } catch (error) {
+      console.log('Propose fall failed:', error);
+      throw error;
+    }
   }
 
   async buyFromProposal(proposalId: string, price: number) {
-    const res: any = await this.send({ buy: proposalId, price });
-    if (res.error) throw res.error;
-    return res.buy;
+    try {
+      const res: any = await this.send({ buy: proposalId, price });
+      if (res.error) throw res.error;
+      return res.buy;
+    } catch (error) {
+      console.log('Buy from proposal failed:', error);
+      throw error;
+    }
   }
 
   async buyRise(symbol: string, stakeUSD: number) {
@@ -443,7 +539,9 @@ class DerivClient {
 
       if (!this.pocSubs.has(contract_id)) {
         this.pocSubs.add(contract_id);
-        this.ws?.send(JSON.stringify({ proposal_open_contract: 1, contract_id, subscribe: 1 }));
+        if (this.ws && this.ws.readyState === 1) {
+          this.ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id, subscribe: 1 }));
+        }
       }
       return contract_id;
     } catch (e) {
@@ -475,7 +573,9 @@ class DerivClient {
 
       if (!this.pocSubs.has(contract_id)) {
         this.pocSubs.add(contract_id);
-        this.ws?.send(JSON.stringify({ proposal_open_contract: 1, contract_id, subscribe: 1 }));
+        if (this.ws && this.ws.readyState === 1) {
+          this.ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id, subscribe: 1 }));
+        }
       }
       return contract_id;
     } catch (e) {

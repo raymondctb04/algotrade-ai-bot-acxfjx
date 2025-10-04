@@ -15,38 +15,67 @@ export default function useDeriv() {
   }, []);
 
   const ensureConnected = async () => {
-    const cfg = botConfigStore.get();
-    if (!cfg.derivAppId) throw new Error('Missing Deriv App ID');
-    await derivClient.connect(cfg.derivAppId);
-    if (cfg.apiToken && !derivClient.authorized) {
-      await derivClient.authorize(cfg.apiToken);
+    try {
+      const cfg = botConfigStore.get();
+      if (!cfg.derivAppId) throw new Error('Missing Deriv App ID');
+      await derivClient.connect(cfg.derivAppId);
+      if (cfg.apiToken && !derivClient.authorized) {
+        await derivClient.authorize(cfg.apiToken);
+      }
+    } catch (error) {
+      console.log('Failed to ensure connection:', error);
+      derivStore.set({ lastError: `Connection failed: ${(error as any).message}` });
+      throw error;
     }
   };
 
   const subscribeSymbols = async (symbols: string[]) => {
-    await ensureConnected();
-    for (const s of symbols) {
-      await derivClient.subscribeTicks(s);
+    try {
+      await ensureConnected();
+      await derivClient.subscribeMultiple(symbols);
+    } catch (error) {
+      console.log('Failed to subscribe to symbols:', error);
+      throw error;
     }
   };
 
   const subscribeCandlesMultiple = async (symbols: string[], granularities: number[]) => {
-    await ensureConnected();
-    await derivClient.subscribeCandlesMultiple(symbols, granularities);
+    try {
+      await ensureConnected();
+      await derivClient.subscribeCandlesMultiple(symbols, granularities);
+    } catch (error) {
+      console.log('Failed to subscribe to candles:', error);
+      throw error;
+    }
   };
 
   const unsubscribeAll = async () => {
-    await derivClient.unsubscribeAll();
+    try {
+      await derivClient.unsubscribeAll();
+    } catch (error) {
+      console.log('Failed to unsubscribe all:', error);
+      // Don't throw here as this is cleanup
+    }
   };
 
   const buyRise = async (symbol: string, stake: number) => {
-    await ensureConnected();
-    return derivClient.buyRise(symbol, stake);
+    try {
+      await ensureConnected();
+      return await derivClient.buyRise(symbol, stake);
+    } catch (error) {
+      console.log('Failed to buy rise:', error);
+      throw error;
+    }
   };
 
   const buyFall = async (symbol: string, stake: number) => {
-    await ensureConnected();
-    return derivClient.buyFall(symbol, stake);
+    try {
+      await ensureConnected();
+      return await derivClient.buyFall(symbol, stake);
+    } catch (error) {
+      console.log('Failed to buy fall:', error);
+      throw error;
+    }
   };
 
   return {

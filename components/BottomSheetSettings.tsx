@@ -1,10 +1,10 @@
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
 import BottomSheet, { BottomSheetBackdrop } from '@gorhom/bottom-sheet';
-import Button from './Button';
+import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
 import { colors } from '../styles/commonStyles';
 import { BotConfig } from '../types/Bot';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import Button from './Button';
 
 interface Props {
   config: BotConfig;
@@ -12,162 +12,162 @@ interface Props {
 }
 
 export default function BottomSheetSettings({ config, onChange }: Props) {
-  const sheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['25%', '50%', '75%'], []);
 
   useEffect(() => {
+    // Expose global function to open settings
     (globalThis as any).openSettingsSheet = () => {
-      console.log('Opening settings bottom sheet');
-      sheetRef.current?.expand();
+      try {
+        bottomSheetRef.current?.expand();
+      } catch (error) {
+        console.log('Error opening settings sheet:', error);
+      }
     };
+
     return () => {
       (globalThis as any).openSettingsSheet = undefined;
     };
   }, []);
 
-  const snapPoints = useMemo(() => ['30%', '60%', '85%'], []);
-
   const renderBackdrop = useCallback(
     (props: any) => (
       <BottomSheetBackdrop
         {...props}
-        appearsOnIndex={0}
         disappearsOnIndex={-1}
-        opacity={0.6}
+        appearsOnIndex={0}
       />
     ),
     []
   );
 
+  const handleClose = () => {
+    try {
+      bottomSheetRef.current?.close();
+    } catch (error) {
+      console.log('Error closing settings sheet:', error);
+    }
+  };
+
+  const handleInputChange = (field: keyof BotConfig, value: string) => {
+    try {
+      if (field === 'tradeStake') {
+        const numValue = parseFloat(value) || 1;
+        onChange({ [field]: numValue });
+      } else {
+        onChange({ [field]: value });
+      }
+    } catch (error) {
+      console.log('Error handling input change:', error);
+    }
+  };
+
   return (
     <BottomSheet
-      ref={sheetRef}
+      ref={bottomSheetRef}
       index={-1}
-      enablePanDownToClose
       snapPoints={snapPoints}
       backdropComponent={renderBackdrop}
-      handleIndicatorStyle={{ backgroundColor: colors.text }}
-      backgroundStyle={{ backgroundColor: colors.backgroundAlt }}
+      enablePanDownToClose
+      backgroundStyle={styles.bottomSheet}
+      handleIndicatorStyle={styles.indicator}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>Settings</Text>
-
-        <Text style={styles.label}>Asset Class</Text>
-        <View style={styles.row}>
-          <Button text="Crypto" onPress={() => onChange({ assetClass: 'crypto' })} style={styles.chip} />
-          <Button text="Stocks" onPress={() => onChange({ assetClass: 'stocks' })} style={styles.chip} />
-          <Button text="Forex" onPress={() => onChange({ assetClass: 'forex' })} style={styles.chip} />
+        <Text style={styles.title}>Bot Settings</Text>
+        
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Deriv App ID</Text>
+          <TextInput
+            style={styles.input}
+            value={config.derivAppId || ''}
+            onChangeText={(text) => handleInputChange('derivAppId', text)}
+            placeholder="Enter Deriv App ID"
+            placeholderTextColor={colors.grey}
+          />
         </View>
 
-        <Text style={styles.label}>Risk Tolerance</Text>
-        <View style={styles.row}>
-          <Button text="Conservative" onPress={() => onChange({ riskTolerance: 'conservative' })} style={styles.chip} />
-          <Button text="Moderate" onPress={() => onChange({ riskTolerance: 'moderate' })} style={styles.chip} />
-          <Button text="Aggressive" onPress={() => onChange({ riskTolerance: 'aggressive' })} style={styles.chip} />
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>API Token</Text>
+          <TextInput
+            style={styles.input}
+            value={config.apiToken || ''}
+            onChangeText={(text) => handleInputChange('apiToken', text)}
+            placeholder="Enter API Token"
+            placeholderTextColor={colors.grey}
+            secureTextEntry
+          />
         </View>
 
-        <Text style={styles.label}>Timeframe</Text>
-        <View style={styles.row}>
-          <Button text="5m" onPress={() => onChange({ timeframe: '5m' })} style={styles.chip} />
-          <Button text="15m" onPress={() => onChange({ timeframe: '15m' })} style={styles.chip} />
-          <Button text="1h" onPress={() => onChange({ timeframe: '1h' })} style={styles.chip} />
-          <Button text="1d" onPress={() => onChange({ timeframe: '1d' })} style={styles.chip} />
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Trade Stake (USD)</Text>
+          <TextInput
+            style={styles.input}
+            value={String(config.tradeStake || 1)}
+            onChangeText={(text) => handleInputChange('tradeStake', text)}
+            placeholder="1"
+            placeholderTextColor={colors.grey}
+            keyboardType="numeric"
+          />
         </View>
 
-        <Text style={styles.label}>Risk per trade</Text>
-        <View style={styles.row}>
-          <Button text="1%" onPress={() => onChange({ riskPerTrade: 0.01 })} style={styles.chip} />
-          <Button text="2%" onPress={() => onChange({ riskPerTrade: 0.02 })} style={styles.chip} />
-          <Button text="0.5%" onPress={() => onChange({ riskPerTrade: 0.005 })} style={styles.chip} />
+        <View style={styles.buttonRow}>
+          <Button
+            text="Close"
+            onPress={handleClose}
+            style={styles.closeButton}
+          />
         </View>
-
-        <Text style={styles.label}>Confluence threshold</Text>
-        <View style={styles.row}>
-          <Button text="70%" onPress={() => onChange({ confluenceThreshold: 0.7 })} style={styles.chip} />
-          <Button text="80%" onPress={() => onChange({ confluenceThreshold: 0.8 })} style={styles.chip} />
-          <Button text="90%" onPress={() => onChange({ confluenceThreshold: 0.9 })} style={styles.chip} />
-        </View>
-
-        <Text style={styles.label}>Broker / API Provider</Text>
-        <View style={styles.row}>
-          <Button text="Deriv" onPress={() => onChange({ apiProvider: 'deriv' })} style={styles.chip} />
-          <Button text="Paper" onPress={() => onChange({ apiProvider: 'paper' })} style={styles.chip} />
-        </View>
-
-        <Text style={styles.label}>Deriv App ID</Text>
-        <TextInput
-          placeholder="1089"
-          placeholderTextColor="#9aa4b2"
-          value={config.derivAppId || ''}
-          onChangeText={(t) => onChange({ derivAppId: t })}
-          style={styles.input}
-        />
-
-        <Text style={styles.label}>Deriv API Token</Text>
-        <TextInput
-          placeholder="Paste your Deriv API token"
-          placeholderTextColor="#9aa4b2"
-          value={config.apiToken}
-          onChangeText={(t) => onChange({ apiToken: t })}
-          style={styles.input}
-          secureTextEntry
-        />
-
-        <Text style={styles.label}>Default Stake (USD)</Text>
-        <TextInput
-          placeholder="1"
-          placeholderTextColor="#9aa4b2"
-          keyboardType="numeric"
-          value={String(config.tradeStake || 1)}
-          onChangeText={(t) => onChange({ tradeStake: Number(t) || 1 })}
-          style={styles.input}
-        />
-
-        <View style={{ height: 16 }} />
-        <Button text="Close" onPress={() => sheetRef.current?.close()} />
       </View>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
+  bottomSheet: {
+    backgroundColor: colors.backgroundAlt,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  indicator: {
+    backgroundColor: colors.grey,
+  },
   content: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
+    flex: 1,
+    padding: 20,
   },
   title: {
+    fontSize: 20,
+    fontWeight: 'bold',
     color: colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 6,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  inputGroup: {
+    marginBottom: 16,
   },
   label: {
+    fontSize: 16,
     color: colors.text,
-    opacity: 0.9,
-    marginTop: 6,
-    marginBottom: 6,
-  },
-  helper: {
-    color: colors.text,
-    opacity: 0.7,
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  chip: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 14,
+    marginBottom: 8,
+    fontWeight: '500',
   },
   input: {
+    backgroundColor: colors.background,
     borderColor: colors.grey,
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
+    fontSize: 16,
     color: colors.text,
-    backgroundColor: colors.background,
+    minHeight: 44,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  closeButton: {
+    backgroundColor: colors.grey,
+    minWidth: 120,
   },
 });

@@ -134,6 +134,8 @@ export default function BotScreen() {
   const [showPine, setShowPine] = useState(false);
   const [openTrades, setOpenTrades] = useState(tradeStore.get().open);
   const [logs, setLogs] = useState(tradeStore.get().logs);
+  const [startingBot, setStartingBot] = useState(false);
+  const [stoppingBot, setStoppingBot] = useState(false);
 
   const assets = config.assets;
   const canRun = assets.length > 0;
@@ -155,6 +157,8 @@ export default function BotScreen() {
       console.log('Start blocked: No assets configured.');
       return;
     }
+    
+    setStartingBot(true);
     try {
       console.log('Starting bot with', { assetsCount: assets.length, provider: config.apiProvider });
       if (config.apiProvider === 'deriv') {
@@ -163,152 +167,191 @@ export default function BotScreen() {
         // Subscribe candles for the required timeframes
         await deriv.subscribeCandlesMultiple(assets, TF_LIST.map((t) => t.sec));
       }
-      console.log('Bot started');
+      console.log('Bot started successfully');
       setRunning(true);
     } catch (e) {
       console.log('Failed to start bot', e);
+      // Don't throw here, just log the error
+    } finally {
+      setStartingBot(false);
     }
   };
+
   const stop = async () => {
     console.log('Stopping bot...');
+    setStoppingBot(true);
     try {
       if (config.apiProvider === 'deriv') {
         await deriv.unsubscribeAll();
       }
+      lastCrossSideRef.current = {};
+      setRunning(false);
+      console.log('Bot stopped successfully');
     } catch (e) {
-      console.log('Unsubscribe error on stop', e);
+      console.log('Error stopping bot', e);
+      // Still set running to false even if unsubscribe fails
+      setRunning(false);
+    } finally {
+      setStoppingBot(false);
     }
-    lastCrossSideRef.current = {};
-    setRunning(false);
-    console.log('Bot stopped');
   };
 
   // Evaluate signals on intervals based on candles
   useEffect(() => {
     if (!running) return;
+    
     const timer = setInterval(() => {
-      const now = Date.now();
-      const newSignals: Signal[] = [];
+      try {
+        const now = Date.now();
+        const newSignals: Signal[] = [];
 
-      for (const symbol of assets) {
-        // Pull candles for all timeframes
-        const perTF = TF_LIST.map((tf) => {
-          const candles = deriv.getCandles(symbol, tf.sec);
-          const closes = candles.map((c: any) => Number(c.close));
-          const highs = candles.map((c: any) => Number(c.high));
-          const lows = candles.map((c: any) => Number(c.low));
-          return { tf, candles, closes, highs, lows };
-        });
+        for (const symbol of assets) {
+          // Pull candles for all timeframes
+          const perTF = TF_LIST.map((tf) => {
+            const candles = deriv.getCandles(symbol, tf.sec);
+            const closes = candles.map((c: any) => Number(c.close));
+            const highs = candles.map((c: any) => Number(c.high));
+            const lows = candles.map((c: any) => Number(c.low));
+            return { tf, candles, closes, highs, lows };
+          });
 
-        perTF.forEach(({ tf, candles, closes, highs, lows }) => {
-          if (candles.length < 60) return; // ensure enough data
+          perTF.forEach(({ tf, candles, closes, highs, lows }) => {
+            if (candles.length < 60) return; // ensure enough data
 
-          // 9/21 EMA
-          const ema9Series = seriesEma(closes, 9);
-          const ema21Series = seriesEma(closes, 21);
-          const e9prev = ema9Series[ema9Series.length - 2];
-          const e21prev = ema21Series[ema21Series.length - 2];
-          const e9 = ema9Series[ema9Series.length - 1];
-          const e21 = ema21Series[ema21Series.length - 1];
-          if (e9 == null || e21 == null || e9prev == null || e21prev == null) return;
+            // 9/21 EMA
+            const ema9Series = seriesEma(closes, 9);
+            const ema21Series = seriesEma(closes, 21);
+            const e9prev = ema9Series[ema9Series.length - 2];
+            const e21prev = ema21Series[ema21Series.length - 2];
+            const e9 = ema9Series[ema9Series.length - 1];
+            const e21 = ema21Series[ema21Series.length - 1];
+            if (e9 == null || e21 == null || e9prev == null || e21prev == null) return;
 
-          const crossUp = (e9prev as number) <= (e21prev as number) && (e9 as number) > (e21 as number);
-          const crossDown = (e9prev as number) >= (e21prev as number) && (e9 as number) < (e21 as number);
+            const crossUp = (e9prev as number) <= (e21prev as number) && (e9 as number) > (e21 as number);
+            const crossDown = (e9prev as number) >= (e21prev as number) && (e9 as number) < (e21 as number);
 
-          // MACD + RSI confluence
-          const macd = calcMACD(closes);
-          const rsi = calcRSI(closes, 14);
-          if (macd.macd == null || macd.signal == null || rsi == null) return;
-          const macdAlignLong = (macd.macd as number) > (macd.signal as number);
-          const macdAlignShort = (macd.macd as number) < (macd.signal as number);
-          const rsiLong = (rsi as number) > 50;
-          const rsiShort = (rsi as number) < 50;
+            // MACD + RSI confluence
+            const macd = calcMACD(closes);
+            const rsi = calcRSI(closes, 14);
+            if (macd.macd == null || macd.signal == null || rsi == null) return;
+            const macdAlignLong = (macd.macd as number) > (macd.signal as number);
+            const macdAlignShort = (macd.macd as number) < (macd.signal as number);
+            const rsiLong = (rsi as number) > 50;
+            const rsiShort = (rsi as number) < 50;
 
-          // Prevent duplicates per symbol+tf until next opposite cross
-          const key = `${symbol}::${tf.sec}`;
-          const lastSide = lastCrossSideRef.current[key];
+            // Prevent duplicates per symbol+tf until next opposite cross
+            const key = `${symbol}::${tf.sec}`;
+            const lastSide = lastCrossSideRef.current[key];
 
-          const atr = calcATR(highs, lows, closes, 14) || 0;
-          const entry = closes[closes.length - 1];
-          // Swings
-          const swingLow = getSwingLow(lows, 10) ?? entry - atr; // fallback
-          const swingHigh = getSwingHigh(highs, 10) ?? entry + atr;
+            const atr = calcATR(highs, lows, closes, 14) || 0;
+            const entry = closes[closes.length - 1];
+            // Swings
+            const swingLow = getSwingLow(lows, 10) ?? entry - atr; // fallback
+            const swingHigh = getSwingHigh(highs, 10) ?? entry + atr;
 
-          if (crossUp && macdAlignLong && rsiLong) {
-            if (lastSide !== 'up') {
-              // SL = min(swing, ATR-based)
-              const atrSL = entry - atr;
-              const sl = Math.min(swingLow, atrSL);
-              const risk = Math.max(1e-6, entry - sl);
-              const tp = entry + 2 * risk;
-              newSignals.unshift({
-                t: now,
-                symbol,
-                timeframe: tf.label,
-                entry,
-                type: 'LONG',
-                rsi: rsi as number,
-                macd: macd.macd as number,
-                macdSignal: macd.signal as number,
-                atr,
-                sl,
-                tp,
-              });
-              lastCrossSideRef.current[key] = 'up';
-            }
-          } else if (crossDown && macdAlignShort && rsiShort) {
-            if (lastSide !== 'down') {
-              const atrSL = entry + atr;
-              const slSwing = swingHigh;
-              const slAtrBased = atrSL;
-              const chosenSL = Math.min(slSwing - entry, slAtrBased - entry) === slSwing - entry ? slSwing : slAtrBased;
-              const risk = Math.max(1e-6, chosenSL - entry);
-              const tp = entry - 2 * risk;
-              newSignals.unshift({
-                t: now,
-                symbol,
-                timeframe: tf.label,
-                entry,
-                type: 'SHORT',
-                rsi: rsi as number,
-                macd: macd.macd as number,
-                macdSignal: macd.signal as number,
-                atr,
-                sl: chosenSL,
-                tp,
-              });
-              lastCrossSideRef.current[key] = 'down';
-            }
-          } else {
-            // keep last side
-          }
-        });
-      }
-
-      if (newSignals.length) {
-        setSignals((prev) => {
-          const merged = [...newSignals, ...prev];
-          return merged.slice(0, 80);
-        });
-
-        // Auto-trade per signal
-        if (config.apiProvider === 'deriv' && (config.apiToken || '').length > 0 && (config.derivAppId || '').length > 0) {
-          newSignals.forEach(async (s) => {
-            try {
-              if (s.type === 'LONG') await deriv.buyRise(s.symbol, config.tradeStake || 1);
-              else await deriv.buyFall(s.symbol, config.tradeStake || 1);
-            } catch (e) {
-              console.log('Auto trade failed', e);
+            if (crossUp && macdAlignLong && rsiLong) {
+              if (lastSide !== 'up') {
+                // SL = min(swing, ATR-based)
+                const atrSL = entry - atr;
+                const sl = Math.min(swingLow, atrSL);
+                const risk = Math.max(1e-6, entry - sl);
+                const tp = entry + 2 * risk;
+                newSignals.unshift({
+                  t: now,
+                  symbol,
+                  timeframe: tf.label,
+                  entry,
+                  type: 'LONG',
+                  rsi: rsi as number,
+                  macd: macd.macd as number,
+                  macdSignal: macd.signal as number,
+                  atr,
+                  sl,
+                  tp,
+                });
+                lastCrossSideRef.current[key] = 'up';
+              }
+            } else if (crossDown && macdAlignShort && rsiShort) {
+              if (lastSide !== 'down') {
+                const atrSL = entry + atr;
+                const slSwing = swingHigh;
+                const slAtrBased = atrSL;
+                const chosenSL = Math.min(slSwing - entry, slAtrBased - entry) === slSwing - entry ? slSwing : slAtrBased;
+                const risk = Math.max(1e-6, chosenSL - entry);
+                const tp = entry - 2 * risk;
+                newSignals.unshift({
+                  t: now,
+                  symbol,
+                  timeframe: tf.label,
+                  entry,
+                  type: 'SHORT',
+                  rsi: rsi as number,
+                  macd: macd.macd as number,
+                  macdSignal: macd.signal as number,
+                  atr,
+                  sl: chosenSL,
+                  tp,
+                });
+                lastCrossSideRef.current[key] = 'down';
+              }
+            } else {
+              // keep last side
             }
           });
         }
+
+        if (newSignals.length) {
+          setSignals((prev) => {
+            const merged = [...newSignals, ...prev];
+            return merged.slice(0, 80);
+          });
+
+          // Auto-trade per signal
+          if (config.apiProvider === 'deriv' && (config.apiToken || '').length > 0 && (config.derivAppId || '').length > 0) {
+            newSignals.forEach(async (s) => {
+              try {
+                if (s.type === 'LONG') {
+                  await deriv.buyRise(s.symbol, config.tradeStake || 1);
+                } else {
+                  await deriv.buyFall(s.symbol, config.tradeStake || 1);
+                }
+              } catch (e) {
+                console.log('Auto trade failed for signal', s.symbol, s.type, e);
+                // Don't throw here, just log the error
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.log('Error in signal evaluation:', error);
+        // Don't throw here, just log the error
       }
     }, 2000);
 
     return () => clearInterval(timer);
-  }, [running, assets, config.apiProvider, config.apiToken, config.derivAppId, config.tradeStake]); // eslint-disable-line
+  }, [running, assets, config.apiProvider, config.apiToken, config.derivAppId, config.tradeStake, deriv]); // eslint-disable-line
 
   const pine = useMemo(() => getPineSample(config), [config]);
+
+  const handleStartBot = () => {
+    start().catch(error => {
+      console.log('Start bot error handled:', error);
+    });
+  };
+
+  const handleStopBot = () => {
+    stop().catch(error => {
+      console.log('Stop bot error handled:', error);
+    });
+  };
+
+  const handleOpenSettings = () => {
+    try {
+      (globalThis as any).openSettingsSheet?.();
+    } catch (error) {
+      console.log('Error opening settings:', error);
+    }
+  };
 
   return (
     <View style={commonStyles.container}>
@@ -326,11 +369,21 @@ export default function BotScreen() {
           <Text style={styles.sectionTitle}>Controls</Text>
           <View style={styles.row}>
             {!running ? (
-              <Button text="Start Bot" onPress={start} style={styles.chip} />
+              <Button 
+                text={startingBot ? "Starting..." : "Start Bot"} 
+                onPress={handleStartBot} 
+                style={[styles.chip, startingBot && { opacity: 0.6 }]}
+                disabled={startingBot}
+              />
             ) : (
-              <Button text="Stop Bot" onPress={stop} style={[styles.chip, { backgroundColor: '#c62828' }]} />
+              <Button 
+                text={stoppingBot ? "Stopping..." : "Stop Bot"} 
+                onPress={handleStopBot} 
+                style={[styles.chip, { backgroundColor: '#c62828' }, stoppingBot && { opacity: 0.6 }]}
+                disabled={stoppingBot}
+              />
             )}
-            <Button text="Open Settings" onPress={() => (globalThis as any).openSettingsSheet?.()} style={styles.chip} />
+            <Button text="Open Settings" onPress={handleOpenSettings} style={styles.chip} />
             <Button text={showPine ? 'Hide Pine Script' : 'Show Pine Script'} onPress={() => setShowPine(v => !v)} style={styles.chip} />
           </View>
           <Text style={styles.helper}>
