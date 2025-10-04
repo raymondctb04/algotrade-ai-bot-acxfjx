@@ -5,8 +5,6 @@ import { colors, commonStyles } from '../../styles/commonStyles';
 import Button from '../../components/Button';
 import useBotConfig from '../../hooks/useBotConfig';
 import useDeriv from '../../hooks/useDeriv';
-import CodeBlock from '../../components/CodeBlock';
-import { getPineSample } from '../../data/snippets';
 import { tradeStore } from '../../store/tradeStore';
 
 // Timeframe mapping (seconds)
@@ -131,7 +129,6 @@ export default function BotScreen() {
   const deriv = useDeriv();
   const [running, setRunning] = useState(false);
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [showPine, setShowPine] = useState(false);
   const [openTrades, setOpenTrades] = useState(tradeStore.get().open);
   const [logs, setLogs] = useState(tradeStore.get().logs);
   const [startingBot, setStartingBot] = useState(false);
@@ -331,8 +328,6 @@ export default function BotScreen() {
     return () => clearInterval(timer);
   }, [running, assets, config.apiProvider, config.apiToken, config.derivAppId, config.tradeStake, deriv]); // eslint-disable-line
 
-  const pine = useMemo(() => getPineSample(config), [config]);
-
   const handleStartBot = () => {
     start().catch(error => {
       console.log('Start bot error handled:', error);
@@ -366,6 +361,28 @@ export default function BotScreen() {
         </Text>
 
         <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Trading Strategy</Text>
+          <Text style={styles.strategyText}>
+            • <Text style={styles.highlight}>Primary Signal</Text>: 9/21 EMA crossover
+          </Text>
+          <Text style={styles.strategyText}>
+            • <Text style={styles.highlight}>MACD Confluence</Text>: MACD line vs signal line alignment
+          </Text>
+          <Text style={styles.strategyText}>
+            • <Text style={styles.highlight}>RSI Filter</Text>: RSI > 50 for longs, RSI < 50 for shorts
+          </Text>
+          <Text style={styles.strategyText}>
+            • <Text style={styles.highlight}>Risk Management</Text>: Stop-loss based on swing/ATR, 1:2 R:R
+          </Text>
+          <Text style={styles.strategyText}>
+            • <Text style={styles.highlight}>Timeframes</Text>: 5m, 15m, 1h, 4h analysis
+          </Text>
+          <Text style={styles.strategyText}>
+            • <Text style={styles.highlight}>Execution</Text>: 1-minute CALL/PUT contracts on Deriv
+          </Text>
+        </View>
+
+        <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Controls</Text>
           <View style={styles.row}>
             {!running ? (
@@ -384,7 +401,6 @@ export default function BotScreen() {
               />
             )}
             <Button text="Open Settings" onPress={handleOpenSettings} style={styles.chip} />
-            <Button text={showPine ? 'Hide Pine Script' : 'Show Pine Script'} onPress={() => setShowPine(v => !v)} style={styles.chip} />
           </View>
           <Text style={styles.helper}>
             Assets: {assets.length ? assets.join(', ') : 'None'} | Stake: ${config.tradeStake || 1}
@@ -394,17 +410,10 @@ export default function BotScreen() {
           </Text>
         </View>
 
-        {showPine ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Pine Script</Text>
-            <CodeBlock code={pine} language="pine" />
-          </View>
-        ) : null}
-
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Recent Signals</Text>
           {!signals.length ? (
-            <Text style={styles.helper}>No signals yet.</Text>
+            <Text style={styles.helper}>No signals yet. Start the bot to begin signal generation.</Text>
           ) : (
             <View style={{ gap: 8 }}>
               {signals.map((s) => (
@@ -483,6 +492,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 8,
+  },
+  strategyText: {
+    color: colors.text,
+    fontSize: 14,
+    marginBottom: 4,
+    lineHeight: 20,
+  },
+  highlight: {
+    color: colors.primary,
+    fontWeight: '600',
   },
   row: {
     flexDirection: 'row',
